@@ -1,0 +1,15 @@
+# build products / throwaway spike artefacts
+spike/apps/
+spike/data/
+spike/shim/shim
+spike/shim/makeicon
+spike/shim/probe
+spike/shim/iconprobe
+spike/shim/handlerprobe
+spike/shim/sethandler
+spike/shim/*.icns
+spike/*.png
+.build/
+*.xcodeproj/xcuserdata/
+DerivedData/
+.DS_Store
