@@ -18,7 +18,7 @@ Inspired by the functionality of [Multi-Claude](https://multiclaude.app).
 
 ## Requirements
 
-- macOS 13 or later, Apple Silicon or Intel (developed on macOS 26).
+- macOS 13 or later on Apple Silicon (developed on macOS 26). Intel Macs are not supported.
 - Claude Desktop installed in `/Applications/Claude.app`. waldo.Claunes runs Anthropic's
   app; it does not bundle, re-host or modify it. If it is missing, the app says so and
   links to the download page.
