@@ -30,7 +30,7 @@ struct MainWindow: View {
             if let p = model.installationProblem {
                 InstallationProblemView(message: p)
             } else if let id = model.selection, let c = model.claunes.first(where: { $0.id == id }) {
-                DetailView(claune: c)
+                DetailView(claune: c).id(c.id)   // fresh view (and @State) per selected Claune
             } else {
                 EmptyStateView()
             }
@@ -149,8 +149,8 @@ struct DetailView: View {
             }
             .padding(20)
         }
-        .onAppear(perform: load)
-        .onChange(of: claune) { _ in load() }
+        .onAppear { load(claune) }
+        .onChange(of: claune) { new in load(new) }   // use the new value: `self` here may be the previous view value
         .confirmationDialog("Move \(claune.name) to the Trash?", isPresented: $confirmDelete) {
             Button("Move app and data to Trash", role: .destructive) { model.delete(claune) }
         } message: { Text("The app in ~/Applications/Claunes and the data folder (login, history, MCP config) are moved to the Trash. Nothing is deleted permanently.") }
@@ -160,10 +160,10 @@ struct DetailView: View {
         name != claune.name || (badge.isEmpty ? Claune.defaultBadge(for: name) : badge) != claune.badge || color.hexString.lowercased() != claune.colorHex.lowercased()
     }
 
-    private func load() {
-        name = claune.name
-        badge = claune.badge
-        color = Color(nsColor: IconGenerator.color(fromHex: claune.colorHex))
+    private func load(_ c: Claune) {
+        name = c.name
+        badge = c.badge
+        color = Color(nsColor: IconGenerator.color(fromHex: c.colorHex))
     }
 
     private func apply() {
