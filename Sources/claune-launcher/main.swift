@@ -72,6 +72,22 @@ guard FileManager.default.fileExists(atPath: target) else {
 }
 
 try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
+
+// First launch of a fresh Claune: explain the browser sign-in trap once (see SPIKE.md).
+if !FileManager.default.fileExists(atPath: dataDir.appendingPathComponent("Cookies").path) {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.regular)
+    let a = NSAlert()
+    a.messageText = "Signing in to \(claune?.name ?? "this Claune")"
+    a.informativeText = "Claude signs in through your web browser. If the browser is already logged in to another Claude account, that account will land in this Claune.\n\nFor a different account: sign out of claude.ai in the browser first, or use a private window. Keep this Claune in front when you click Sign in, so the sign-in callback is routed here."
+    a.alertStyle = .informational
+    a.addButton(withTitle: "Continue")
+    a.addButton(withTitle: "Sign out of claude.ai in browser first")
+    app.activate(ignoringOtherApps: true)
+    if a.runModal() == .alertSecondButtonReturn {
+        NSWorkspace.shared.open(URL(string: "https://claude.ai/logout")!)
+    }
+}
 var args: [String] = [target, "--user-data-dir=\(dataDir.path)"]
 args.append(contentsOf: CommandLine.arguments.dropFirst())
 let cargs = args.map { strdup($0) } + [nil]
