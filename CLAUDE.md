@@ -69,3 +69,10 @@ If a test Claune was launched, restore the URL handler: `claunes handler com.ant
   log the original out).
 - Ask before installing anything on the machine.
 - No telemetry, no network calls of our own.
+
+## Workflow skills (`.claude/skills/`)
+
+- `claunes-tdd`: every code change, Red-Green-Mutate with XCTest. For TDD/SDD requests in this repo use this,
+  not iFacto.SDD (that one is AL/Business Central only and stops without a BC launch.json).
+- `claunes-release`: bump VERSION, tag, GitHub builds/signs/notarizes the release, then deploy.
+- `claunes-deploy`: install the GitHub release (or `--local` build) on this Mac and verify.
