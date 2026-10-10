@@ -50,13 +50,12 @@ if let c = claune, let installation = try? ClaudeInstallation.locate(paths: path
             try FileManager.default.copyItem(at: launcherCopy, to: tmpLauncher)
             try BundleBuilder(paths: paths, launcherBinary: tmpLauncher).build(c, installation: installation)
             try? FileManager.default.removeItem(at: tmpLauncher)
-            // Relaunch through LaunchServices so the fresh bundle (new Info.plist) is what runs.
-            let config = NSWorkspace.OpenConfiguration()
-            config.activates = true
-            let sem = DispatchSemaphore(value: 0)
-            NSWorkspace.shared.openApplication(at: paths.appBundle(for: c), configuration: config) { _, _ in sem.signal() }
-            sem.wait()
-            exit(0)
+            // Exec the freshly generated launcher (same path, new file). Not via LaunchServices:
+            // LS already considers this bundle id running (that is us) and would only activate it.
+            let fresh = launcherCopy.path
+            let cargs = ([fresh] + CommandLine.arguments.dropFirst()).map { strdup($0) } + [nil]
+            execv(fresh, cargs)
+            FileHandle.standardError.write("claune-launcher: exec of regenerated launcher failed: \(String(cString: strerror(errno)))\n".data(using: .utf8)!)
         } catch {
             // Fall through and run the old clone; the main app offers Resync.
             FileHandle.standardError.write("claune-launcher: resync failed: \(error)\n".data(using: .utf8)!)

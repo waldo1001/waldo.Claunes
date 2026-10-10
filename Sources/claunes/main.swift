@@ -15,6 +15,7 @@ func usage() -> Never {
       migrate <name>               import ~/Library/Application Support/Claude into <name>
       doctor                       check the installation and paths
       handler [bundle-id]          show or set the claude:// handler
+      icon <out.icns> [badge] [#hex] write a generated icon (used by the build script)
     """)
     exit(2)
 }
@@ -92,6 +93,10 @@ do {
         do { let i = try manager.installation(); print("Claude:       \(i.bundleURL.path) version \(i.version) asar \(i.asarHash ?? "-")") } catch { print("Claude:       \(error.localizedDescription)") }
         if let m = Migration.detectOriginalData(paths: paths) { print("original data: \(m.url.path) \(ByteCountFormatter.string(fromByteCount: m.sizeBytes, countStyle: .file))") } else { print("original data: none") }
         print("claude:// handler: \(ProtocolHandler.current ?? "none")")
+    case "icon":
+        guard args.count >= 2 else { usage() }
+        try IconGenerator.writeICNS(badge: args.count > 2 ? args[2] : "C", colorHex: args.count > 3 ? args[3] : Claune.palette[0], to: URL(fileURLWithPath: args[1]))
+        print("wrote \(args[1])")
     case "handler":
         if args.count == 2 { print(ProtocolHandler.setDefault(bundleIdentifier: args[1]) ? "set" : "failed") }
         print(ProtocolHandler.current ?? "none")
