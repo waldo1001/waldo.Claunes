@@ -1,0 +1,114 @@
+name: Release
+
+# Push a tag that matches VERSION (e.g. v0.1.0) to build, sign, notarize and publish a GitHub Release.
+#
+# Required repository secrets:
+#   MACOS_CERT_P12        base64 of the "Developer ID Application" certificate + private key (.p12)
+#   MACOS_CERT_PASSWORD   password of that .p12
+# Notarization, one of:
+#   NOTARY_KEY_P8 (base64 of the .p8), NOTARY_KEY_ID, NOTARY_ISSUER        App Store Connect API key (preferred)
+#   NOTARY_APPLE_ID, NOTARY_TEAM_ID, NOTARY_PASSWORD (app-specific)        Apple ID
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)release, e.g. v0.1.0'
+        required: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Check tag matches VERSION
+        run: |
+          VERSION=$(cat VERSION)
+          [ "$TAG" = "v$VERSION" ] || { echo "::error::tag $TAG does not match VERSION $VERSION"; exit 1; }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Toolchain
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          swift --version
+
+      - name: Test
+        run: swift test --parallel
+
+      - name: Import signing certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          [ -n "$MACOS_CERT_P12" ] || { echo "::error::MACOS_CERT_P12 secret is not set; refusing to publish an unsigned release"; exit 1; }
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')
+          [ -n "$IDENTITY" ] || { echo "::error::no Developer ID Application identity in MACOS_CERT_P12"; exit 1; }
+          echo "IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Build, sign and notarize
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          if [ -n "$NOTARY_KEY_P8" ]; then
+            export NOTARY_KEY_PATH="$RUNNER_TEMP/notary.p8"
+            echo "$NOTARY_KEY_P8" | base64 --decode > "$NOTARY_KEY_PATH"
+          elif [ -z "$NOTARY_APPLE_ID" ]; then
+            echo "::error::no notarization secrets set (NOTARY_KEY_P8/NOTARY_KEY_ID/NOTARY_ISSUER or NOTARY_APPLE_ID/NOTARY_TEAM_ID/NOTARY_PASSWORD)"
+            exit 1
+          fi
+          scripts/release.sh "$IDENTITY"
+          rm -f "$RUNNER_TEMP/notary.p8"
+
+      - name: Verify
+        run: |
+          xcrun stapler validate build/waldo.Claunes.app
+          spctl -a -vv -t exec build/waldo.Claunes.app
+          cd build && shasum -a 256 "waldo.Claunes-$VERSION.zip" > "waldo.Claunes-$VERSION.zip.sha256"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FILES=("build/waldo.Claunes-$VERSION.zip" "build/waldo.Claunes-$VERSION.zip.sha256")
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${FILES[@]}" --clobber
+          else
+            gh release create "$TAG" "${FILES[@]}" --title "waldo.Claunes $VERSION" --generate-notes --verify-tag
+          fi
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          [ -n "${KEYCHAIN:-}" ] && security delete-keychain "$KEYCHAIN" || true
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/cert.p12"

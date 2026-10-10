@@ -5,6 +5,10 @@
 #
 # One-time setup for notarization (stores an app-specific password in your keychain):
 #   xcrun notarytool store-credentials claunes --apple-id you@example.com --team-id TEAMID --password app-specific-password
+#
+# Without a keychain profile, notarization credentials can come from the environment (used by CI):
+#   NOTARY_KEY_PATH + NOTARY_KEY_ID + NOTARY_ISSUER        App Store Connect API key (.p8)
+#   NOTARY_APPLE_ID + NOTARY_TEAM_ID + NOTARY_PASSWORD     Apple ID with an app-specific password
 set -euo pipefail
 IDENTITY=${1:?signing identity required}
 PROFILE=${2:-}
@@ -28,8 +32,17 @@ rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
 echo "signed: $ZIP"
 
+NOTARY_AUTH=()
 if [ -n "$PROFILE" ]; then
-  xcrun notarytool submit "$ZIP" --keychain-profile "$PROFILE" --wait
+  NOTARY_AUTH=(--keychain-profile "$PROFILE")
+elif [ -n "${NOTARY_KEY_PATH:-}" ]; then
+  NOTARY_AUTH=(--key "$NOTARY_KEY_PATH" --key-id "${NOTARY_KEY_ID:?}" --issuer "${NOTARY_ISSUER:?}")
+elif [ -n "${NOTARY_APPLE_ID:-}" ]; then
+  NOTARY_AUTH=(--apple-id "$NOTARY_APPLE_ID" --team-id "${NOTARY_TEAM_ID:?}" --password "${NOTARY_PASSWORD:?}")
+fi
+
+if [ ${#NOTARY_AUTH[@]} -gt 0 ]; then
+  xcrun notarytool submit "$ZIP" "${NOTARY_AUTH[@]}" --wait
   xcrun stapler staple "$APP"
   rm -f "$ZIP"
   ditto -c -k --keepParent "$APP" "$ZIP"

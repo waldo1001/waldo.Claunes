@@ -53,6 +53,8 @@ scripts/release.sh "Developer ID Application: Dynex (92A2K3Q7NH)" [claunes]  # D
 scripts/deploy.sh               # build + sign + install to /Applications + resync stopped Claunes + launch (the usual update path)
 .build/debug/claunes doctor    # checks paths and the installed Claude
 ```
+CI: `.github/workflows/ci.yml` (build + test + unsigned app artifact on push/PR). Release: push tag `v$(cat VERSION)`;
+`.github/workflows/release.yml` signs, notarizes (env-var credentials in `release.sh`) and publishes the GitHub Release.
 Smoke test by hand only with Claunes named `Test-*`; delete them afterwards (CLI `delete` or the app).
 If a test Claune was launched, restore the URL handler: `claunes handler com.anthropic.claudefordesktop`.
 

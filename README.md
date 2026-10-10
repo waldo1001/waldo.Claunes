@@ -1,5 +1,8 @@
 # waldo.Claunes
 
+[![CI](https://github.com/waldo1001/waldo.Claunes/actions/workflows/ci.yml/badge.svg)](https://github.com/waldo1001/waldo.Claunes/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/waldo1001/waldo.Claunes)](https://github.com/waldo1001/waldo.Claunes/releases/latest)
+
 Run several Claude Desktop accounts side by side on one Mac. Each profile is a
 **Claune** (Claude + clone): its own login, chat history, settings and MCP servers, its
 own app in `~/Applications/Claunes/` with its own name and colored icon in Spotlight,
@@ -23,6 +26,9 @@ Inspired by the functionality of [Multi-Claude](https://multiclaude.app).
 
 ## Install / build
 
+Signed and notarized builds are on the [Releases](https://github.com/waldo1001/waldo.Claunes/releases/latest)
+page: unzip, move `waldo.Claunes.app` to `/Applications`, open it. Or build from source:
+
 ```sh
 git clone https://github.com/waldo1001/waldo.Claunes.git
 cd waldo.Claunes
@@ -45,6 +51,19 @@ are signed with a Developer ID and notarized:
 xcrun notarytool store-credentials claunes --apple-id you@example.com --team-id TEAMID --password app-specific-password   # once
 scripts/release.sh "Developer ID Application: Name (TEAMID)" claunes   # -> build/waldo.Claunes-<version>.zip
 ```
+
+## CI/CD
+
+- **CI** (`.github/workflows/ci.yml`): every push to `main` and every pull request builds,
+  runs the tests, assembles the app and uploads an unsigned zip as a workflow artifact.
+- **Release** (`.github/workflows/release.yml`): bump `VERSION`, commit, then
+  `git tag v<version> && git push origin v<version>`. The workflow checks the tag matches
+  `VERSION`, tests, signs with the Developer ID, notarizes, staples and publishes a GitHub
+  Release with the zip and its SHA-256. It refuses to publish without signing secrets.
+  Repository secrets: `MACOS_CERT_P12` (base64 .p12 with the Developer ID Application
+  certificate and key), `MACOS_CERT_PASSWORD`, and either `NOTARY_KEY_P8` (base64),
+  `NOTARY_KEY_ID`, `NOTARY_ISSUER` (App Store Connect API key) or `NOTARY_APPLE_ID`,
+  `NOTARY_TEAM_ID`, `NOTARY_PASSWORD` (app-specific password).
 
 ## Use
 

@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          swift --version
+
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ hashFiles('Sources/**', 'Tests/**') }}
+          restore-keys: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+
+      - name: Build (debug)
+        run: swift build
+
+      - name: Test
+        run: swift test --parallel
+
+      - name: Assemble app (release, ad-hoc signed)
+        run: scripts/build-app.sh release
+
+      - name: Smoke check
+        run: |
+          APP=build/waldo.Claunes.app
+          plutil -lint "$APP/Contents/Info.plist"
+          test -x "$APP/Contents/MacOS/waldo.Claunes"
+          test -x "$APP/Contents/MacOS/claune-launcher"
+          test -s "$APP/Contents/Resources/AppIcon.icns"
+          codesign --verify --deep --strict "$APP"
+
+      - name: Package
+        run: ditto -c -k --keepParent build/waldo.Claunes.app "build/waldo.Claunes-$(cat VERSION)-${GITHUB_SHA::7}-unsigned.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: waldo.Claunes-unsigned
+          path: build/*.zip
+          retention-days: 14
