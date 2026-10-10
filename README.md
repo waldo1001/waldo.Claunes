@@ -64,6 +64,8 @@ scripts/release.sh "Developer ID Application: Name (TEAMID)" claunes   # -> buil
   certificate and key), `MACOS_CERT_PASSWORD`, and either `NOTARY_KEY_P8` (base64),
   `NOTARY_KEY_ID`, `NOTARY_ISSUER` (App Store Connect API key) or `NOTARY_APPLE_ID`,
   `NOTARY_TEAM_ID`, `NOTARY_PASSWORD` (app-specific password).
+  `scripts/setup-release-secrets.sh <issuer-id> <AuthKey_KEYID.p8>` sets all of them from the
+  login keychain and an App Store Connect API key (Developer role), validated first.
 
 ## Use
 
