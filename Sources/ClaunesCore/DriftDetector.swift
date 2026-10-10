@@ -8,6 +8,8 @@ public enum DriftState: Equatable {
     case corrupt(String)
     /// Generated from an older/newer Claude than the one installed, or older layout.
     case outdated(bundleVersion: String, installedVersion: String)
+    /// The launcher binary inside the bundle differs from the one shipped by the installed app.
+    case launcherOutdated
     /// Name/badge/color in the profile changed since generation.
     case profileChanged
     case upToDate
@@ -18,6 +20,7 @@ public enum DriftState: Equatable {
         case .missing: return "App bundle missing"
         case .corrupt(let why): return "App bundle damaged: \(why)"
         case .outdated(let b, let i): return "Generated from Claude \(b), installed is \(i)"
+        case .launcherOutdated: return "Launcher is older than the installed waldo.Claunes"
         case .profileChanged: return "Name or icon changed"
         case .upToDate: return "Up to date"
         }
@@ -25,7 +28,8 @@ public enum DriftState: Equatable {
 }
 
 public enum DriftDetector {
-    public static func check(_ claune: Claune, paths: ClaunesPaths, installation: ClaudeInstallation) -> DriftState {
+    /// `launcherBinary`: the launcher the current app ships; nil skips the launcher comparison.
+    public static func check(_ claune: Claune, paths: ClaunesPaths, installation: ClaudeInstallation, launcherBinary: URL? = nil) -> DriftState {
         let fm = FileManager.default
         let app = paths.appBundle(for: claune)
         guard fm.fileExists(atPath: app.path) else { return .missing }
@@ -39,6 +43,9 @@ public enum DriftDetector {
             || stamp.sourceVersion != installation.version
             || (installation.asarHash != nil && stamp.sourceAsarHash != installation.asarHash!) {
             return .outdated(bundleVersion: stamp.sourceVersion, installedVersion: installation.version)
+        }
+        if let lb = launcherBinary, let want = BundleBuilder.digest(of: lb), stamp.launcherHash != want {
+            return .launcherOutdated
         }
         if stamp.name != claune.name || stamp.dataDir != paths.dataDir(for: claune).path
             || stamp.bundleIdentifier != claune.bundleIdentifier {

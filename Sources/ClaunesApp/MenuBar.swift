@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import ClaunesCore
 import SwiftUI
 
@@ -42,6 +43,12 @@ struct MenuBarMenu: View {
         Divider()
         Button("New Claune…") { model.showNewSheet = true; model.openMainWindow(); openWindow(id: "main") }
         Button("Open waldo.Claunes") { openWindow(id: "main"); model.openMainWindow() }
+        Toggle("Open at Login", isOn: Binding(
+            get: { SMAppService.mainApp.status == .enabled },
+            set: { on in
+                do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
+                catch { model.errorMessage = "Open at Login: \(error.localizedDescription)" }
+            }))
         Divider()
         Button("Quit waldo.Claunes") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }

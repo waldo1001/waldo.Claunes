@@ -40,14 +40,23 @@ if let store = try? ProfileStore(paths: paths), let c = store.claune(id: clauneI
 // Drift repair: if Claude Desktop was updated since this bundle was generated, regenerate it
 // (an APFS clone, well under a second) before starting. Safe because we are the only process
 // of this Claune right now (we have not exec'd yet) and the launcher binary itself is kept.
+/// The launcher shipped by the installed waldo.Claunes app, if the app is installed.
+func installedAppLauncher() -> URL? {
+    guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "be.waldo.claunes") else { return nil }
+    let url = app.appendingPathComponent("Contents/MacOS/claune-launcher")
+    return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
+}
+
 if let c = claune, let installation = try? ClaudeInstallation.locate(paths: paths) {
-    let state = DriftDetector.check(c, paths: paths, installation: installation)
-    if case .outdated = state {
+    let appLauncher = installedAppLauncher()
+    let state = DriftDetector.check(c, paths: paths, installation: installation, launcherBinary: appLauncher)
+    if state == .launcherOutdated || { if case .outdated = state { return true } else { return false } }() {
         let launcherCopy = contents.appendingPathComponent("MacOS/\(BundleBuilder.launcherExecutableName)")
-        // Copy ourselves aside first: build() trashes the old bundle, including this file.
+        // Source for the new bundle's launcher: the installed app's copy (so launcher fixes propagate),
+        // else a copy of ourselves set aside first, because build() trashes the old bundle including this file.
         let tmpLauncher = FileManager.default.temporaryDirectory.appendingPathComponent("claune-launcher-\(UUID().uuidString)")
         do {
-            try FileManager.default.copyItem(at: launcherCopy, to: tmpLauncher)
+            try FileManager.default.copyItem(at: appLauncher ?? launcherCopy, to: tmpLauncher)
             try BundleBuilder(paths: paths, launcherBinary: tmpLauncher).build(c, installation: installation)
             try? FileManager.default.removeItem(at: tmpLauncher)
             // Exec the freshly generated launcher (same path, new file). Not via LaunchServices:

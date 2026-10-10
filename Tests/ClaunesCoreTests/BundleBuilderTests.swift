@@ -109,6 +109,19 @@ final class BundleBuilderTests: XCTestCase {
         if case .corrupt = DriftDetector.check(claune, paths: paths, installation: inst) {} else { XCTFail("expected corrupt") }
     }
 
+    func testLauncherDriftIsDetected() throws {
+        let inst = try ClaudeInstallation.locate(paths: paths)
+        let claune = Claune(name: "Test-Launcher", colorHex: "#2E7D32")
+        try BundleBuilder(paths: paths, launcherBinary: launcher).build(claune, installation: inst)
+        XCTAssertEqual(DriftDetector.check(claune, paths: paths, installation: inst, launcherBinary: launcher), .upToDate)
+        let newer = root.appendingPathComponent("launcher2")
+        try "#!/bin/sh\necho launcher v2\n".write(to: newer, atomically: true, encoding: .utf8)
+        XCTAssertEqual(DriftDetector.check(claune, paths: paths, installation: inst, launcherBinary: newer), .launcherOutdated)
+        XCTAssertEqual(DriftDetector.check(claune, paths: paths, installation: inst, launcherBinary: nil), .upToDate, "nil skips the comparison")
+        let stamp = try XCTUnwrap(BundleBuilder.stamp(of: paths.appBundle(for: claune)))
+        XCTAssertEqual(stamp.launcherHash, BundleBuilder.digest(of: launcher))
+    }
+
     func testMigrationCopiesAndRefusesNonEmptyTarget() throws {
         let fm = FileManager.default
         XCTAssertNil(Migration.detectOriginalData(paths: paths))

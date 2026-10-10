@@ -18,7 +18,9 @@ records what works, what gets SIGKILLed, and why.
 - `Sources/ClaunesApp`: SwiftUI app. `AppModel` (main actor state), `MainWindow` (sidebar + detail,
   sheets), `MenuBar` (MenuBarExtra).
 - `Tests/ClaunesCoreTests`: XCTest against a fake Claude.app in a temp dir. Never touches the real app.
-- `scripts/build-app.sh [release]` assembles `build/waldo.Claunes.app`; `scripts/install.sh` copies it to /Applications.
+- `scripts/build-app.sh [release]` assembles `build/waldo.Claunes.app`; `scripts/release.sh` signs/notarizes; `scripts/deploy.sh` installs on this Mac.
+- Launcher drift: every Claune's Info.plist stores `ClauneLauncherHash`; `DriftDetector` reports `.launcherOutdated` when the
+  installed app ships a different launcher, and the launcher repairs using the installed app's copy (found via bundle id `be.waldo.claunes`).
 - `spike/`: Phase 0 throwaway scripts and probes (kept for reference).
 
 ## Bundle layout (G)
@@ -48,6 +50,7 @@ swift build                 # all targets (debug)
 swift test                  # 11+ unit tests, fake Claude.app, no side effects
 scripts/build-app.sh release   # -> build/waldo.Claunes.app (ad-hoc signed)
 scripts/release.sh "Developer ID Application: Dynex (92A2K3Q7NH)" [claunes]  # Developer ID sign (+ notarize with the keychain profile)
+scripts/deploy.sh               # build + sign + install to /Applications + resync stopped Claunes + launch (the usual update path)
 .build/debug/claunes doctor    # checks paths and the installed Claude
 ```
 Smoke test by hand only with Claunes named `Test-*`; delete them afterwards (CLI `delete` or the app).

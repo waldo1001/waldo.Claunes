@@ -1,5 +1,12 @@
 import Foundation
 
+public enum ClauneManagerError: Error, LocalizedError {
+    case running(String)
+    public var errorDescription: String? {
+        switch self { case .running(let n): return "\(n) is running. Quit it first." }
+    }
+}
+
 /// High-level operations the UI and CLI call. Owns a ProfileStore and a BundleBuilder.
 public final class ClauneManager {
     public let paths: ClaunesPaths
@@ -30,6 +37,7 @@ public final class ClauneManager {
     /// Rename / recolor / rebadge, then regenerate the bundle (new name => new bundle folder name).
     public func update(_ updated: Claune) throws {
         guard let old = store.claune(id: updated.id) else { throw ProfileStoreError.notFound(updated.id) }
+        guard !Runtime.isRunning(old) else { throw ClauneManagerError.running(old.name) }
         let installation = try installation()
         if old.appFileName != updated.appFileName {
             let oldApp = paths.appBundle(for: old)
@@ -43,6 +51,7 @@ public final class ClauneManager {
 
     /// Regenerate the bundle from the currently installed Claude ("Resync").
     public func resync(_ claune: Claune) throws {
+        guard !Runtime.isRunning(claune) else { throw ClauneManagerError.running(claune.name) }
         let installation = try installation()
         var c = claune
         try builder.build(c, installation: installation)
@@ -52,11 +61,12 @@ public final class ClauneManager {
 
     public func drift(_ claune: Claune) -> DriftState {
         guard let installation = try? installation() else { return .corrupt("Claude Desktop not installed") }
-        return DriftDetector.check(claune, paths: paths, installation: installation)
+        return DriftDetector.check(claune, paths: paths, installation: installation, launcherBinary: launcherBinary)
     }
 
     /// Moves app bundle and data folder to the Trash and forgets the profile. Never hard-deletes.
     public func delete(_ claune: Claune) throws {
+        guard !Runtime.isRunning(claune) else { throw ClauneManagerError.running(claune.name) }
         try FileOps.withWritable(paths.applicationsDir) { try FileOps.trash(paths.appBundle(for: claune)) }
         try FileOps.trash(paths.dataDir(for: claune))
         try store.remove(id: claune.id)

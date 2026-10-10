@@ -16,6 +16,7 @@ func usage() -> Never {
       doctor                       check the installation and paths
       handler [bundle-id]          show or set the claude:// handler
       icon <out.icns> [badge] [#hex] write a generated icon (used by the build script)
+      trash-previous-install <app>  move an older waldo.Claunes.app to the Trash (deploy script)
     """)
     exit(2)
 }
@@ -68,7 +69,10 @@ do {
     case "resync":
         guard args.count == 2 else { usage() }
         let targets = args[1] == "--all" ? manager.store.claunes : [find(args[1])]
-        for c in targets { try manager.resync(c); print("resynced \(c.name)") }
+        for c in targets {
+            if Runtime.isRunning(c) { print("skipped \(c.name): running (repaired automatically at its next launch)"); continue }
+            try manager.resync(c); print("resynced \(c.name)")
+        }
     case "rename":
         guard args.count == 3 else { usage() }
         var c = find(args[1]); c.name = args[2]; c.badge = Claune.defaultBadge(for: args[2])
@@ -97,6 +101,12 @@ do {
         guard args.count >= 2 else { usage() }
         try IconGenerator.writeICNS(badge: args.count > 2 ? args[2] : "C", colorHex: args.count > 3 ? args[3] : Claune.palette[0], to: URL(fileURLWithPath: args[1]))
         print("wrote \(args[1])")
+    case "trash-previous-install":
+        guard args.count == 2 else { usage() }
+        let app = URL(fileURLWithPath: args[1])
+        let id = (NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) as? [String: Any])?["CFBundleIdentifier"] as? String
+        guard id == "be.waldo.claunes" else { fail("\(app.path) is not a waldo.Claunes.app bundle; refusing") }
+        try FileOps.trash(app); print("moved \(app.path) to the Trash")
     case "handler":
         if args.count == 2 { print(ProtocolHandler.setDefault(bundleIdentifier: args[1]) ? "set" : "failed") }
         print(ProtocolHandler.current ?? "none")

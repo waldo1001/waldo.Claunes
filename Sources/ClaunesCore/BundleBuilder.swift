@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Generates and refreshes the per-Claune app bundle (layout "G" from SPIKE.md):
@@ -102,11 +103,18 @@ public struct BundleBuilder {
         plist["ClauneSourceVersion"] = installation.version
         plist["ClauneSourceAsarHash"] = installation.asarHash ?? ""
         plist["ClauneLayoutVersion"] = BundleBuilder.layoutVersion
+        plist["ClauneLauncherHash"] = BundleBuilder.digest(of: launcherBinary) ?? ""
         plist["ClauneGeneratedAt"] = ISO8601DateFormatter().string(from: Date())
         let plistURL = contents.appendingPathComponent("Info.plist")
         guard (plist as NSDictionary).write(to: plistURL, atomically: true) else { throw BuildError.plistWrite(plistURL) }
 
         try fm.createDirectory(at: paths.dataDir(for: claune), withIntermediateDirectories: true)
+    }
+
+    /// SHA-256 of a file, used to detect a stale launcher inside a Claune after a redeploy.
+    public static func digest(of file: URL) -> String? {
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Reads the Claune-specific keys of a generated bundle's Info.plist.
@@ -115,7 +123,8 @@ public struct BundleBuilder {
               let idString = d["ClauneID"] as? String, let id = UUID(uuidString: idString) else { return nil }
         return BundleStamp(id: id, name: d["ClauneName"] as? String ?? "", dataDir: d["ClauneDataDir"] as? String ?? "",
                            sourceVersion: d["ClauneSourceVersion"] as? String ?? "", sourceAsarHash: d["ClauneSourceAsarHash"] as? String ?? "",
-                           layoutVersion: d["ClauneLayoutVersion"] as? Int ?? 0, bundleIdentifier: d["CFBundleIdentifier"] as? String ?? "")
+                           layoutVersion: d["ClauneLayoutVersion"] as? Int ?? 0, bundleIdentifier: d["CFBundleIdentifier"] as? String ?? "",
+                           launcherHash: d["ClauneLauncherHash"] as? String ?? "")
     }
 }
 
@@ -127,4 +136,5 @@ public struct BundleStamp: Equatable {
     public var sourceAsarHash: String
     public var layoutVersion: Int
     public var bundleIdentifier: String
+    public var launcherHash: String
 }
