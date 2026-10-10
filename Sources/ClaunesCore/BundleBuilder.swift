@@ -68,8 +68,11 @@ public struct BundleBuilder {
         let nested = contents.appendingPathComponent(BundleBuilder.nestedAppName, isDirectory: true)
         try FileOps.clone(from: installation.bundleURL, to: nested)
 
-        // 2. Launcher + symlinks.
-        try fm.copyItem(at: launcherBinary, to: macos.appendingPathComponent(BundleBuilder.launcherExecutableName))
+        // 2. Launcher + symlinks. The copy is re-signed ad-hoc: a release build ships it Developer ID signed, and that
+        //    signature on the main executable of our unsealed wrapper makes Gatekeeper call the Claune "damaged".
+        let launcherCopy = macos.appendingPathComponent(BundleBuilder.launcherExecutableName)
+        try fm.copyItem(at: launcherBinary, to: launcherCopy)
+        try FileOps.adHocSign(launcherCopy)
         try FileOps.symlink(at: macos.appendingPathComponent("Claude"), to: "../\(BundleBuilder.nestedAppName)/Contents/MacOS/Claude")
         try FileOps.symlink(at: contents.appendingPathComponent("Frameworks"), to: "../\(BundleBuilder.nestedAppName)/Contents/Frameworks")
         let nestedResources = nested.appendingPathComponent("Contents/Resources", isDirectory: true)

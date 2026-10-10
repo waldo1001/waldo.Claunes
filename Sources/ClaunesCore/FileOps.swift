@@ -46,6 +46,22 @@ public enum FileOps {
         return total
     }
 
+    /// Replaces the signature of a Mach-O with an ad-hoc one (`codesign --force --sign -`).
+    /// A Developer ID signed main executable makes Gatekeeper demand a sealed bundle, which a Claune wrapper
+    /// does not have ("damaged and can't be opened"); an ad-hoc launcher launches fine (SPIKE.md).
+    public static func adHocSign(_ file: URL) throws {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        p.arguments = ["--force", "--sign", "-", file.path]
+        let err = Pipe(); p.standardError = err; p.standardOutput = FileHandle.nullDevice
+        try p.run(); p.waitUntilExit()
+        guard p.terminationStatus == 0 else {
+            let msg = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            throw NSError(domain: "waldo.Claunes.FileOps", code: Int(p.terminationStatus),
+                          userInfo: [NSLocalizedDescriptionKey: "codesign of \(file.lastPathComponent) failed: \(msg.trimmingCharacters(in: .whitespacesAndNewlines))"])
+        }
+    }
+
     /// Moves to the Trash. Never deletes.
     public static func trash(_ url: URL) throws {
         guard FileManager.default.fileExists(atPath: url.path) else { return }

@@ -122,6 +122,35 @@ final class BundleBuilderTests: XCTestCase {
         XCTAssertEqual(stamp.launcherHash, BundleBuilder.digest(of: launcher))
     }
 
+    /// `codesign -dv` output (it writes to stderr) for a file.
+    private func signatureInfo(of file: URL) -> String {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/codesign"); p.arguments = ["-dv", file.path]
+        let pipe = Pipe(); p.standardError = pipe; p.standardOutput = pipe
+        try? p.run(); p.waitUntilExit()
+        return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    }
+
+    /// A release build ships a Developer ID + hardened-runtime launcher. Copied as-is into a wrapper that has no
+    /// bundle seal, Gatekeeper reports the Claune as "damaged" (code has no resources but signature indicates they
+    /// must be present). The copy inside the bundle must therefore always be ad-hoc signed (SPIKE.md, code signing summary).
+    func testBuiltLauncherIsAdHocSignedWhateverTheSourceSignature() throws {
+        let fm = FileManager.default
+        let signedSource = root.appendingPathComponent("signed-launcher")
+        try fm.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: signedSource)   // any Mach-O with a real (non-adhoc) signature
+        XCTAssertTrue(signatureInfo(of: signedSource).contains("Signature size="), "fixture must carry a real signature")
+        let inst = try ClaudeInstallation.locate(paths: paths)
+        let claune = Claune(name: "Test-Sign", colorHex: "#2E7D32")
+        let app = try BundleBuilder(paths: paths, launcherBinary: signedSource).build(claune, installation: inst)
+        let copy = app.appendingPathComponent("Contents/MacOS/ClauneLauncher")
+        let info = signatureInfo(of: copy)
+        XCTAssertTrue(info.contains("Signature=adhoc"), "launcher inside the Claune must be ad-hoc signed, got:\n\(info)")
+        XCTAssertTrue(info.contains("TeamIdentifier=not set"), info)
+        // The source is untouched and the drift stamp still hashes the shipped launcher, not the re-signed copy.
+        XCTAssertTrue(signatureInfo(of: signedSource).contains("Signature size="), "source launcher must not be modified")
+        XCTAssertEqual(BundleBuilder.stamp(of: app)?.launcherHash, BundleBuilder.digest(of: signedSource))
+        XCTAssertNotEqual(BundleBuilder.digest(of: copy), BundleBuilder.digest(of: signedSource), "re-signing changes the bytes of the copy")
+    }
+
     func testMigrationCopiesAndRefusesNonEmptyTarget() throws {
         let fm = FileManager.default
         XCTAssertNil(Migration.detectOriginalData(paths: paths))

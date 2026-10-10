@@ -150,6 +150,15 @@ stays the same.
   it. This does not matter for launching: it is created locally (no quarantine) and the
   executable that matters is validated on its real path. It would matter if someone zipped
   and shared a Claune bundle; that is not a use case (the app regenerates them).
+- The launcher copy inside a Claune MUST stay ad-hoc signed. The release build signs
+  `claune-launcher` with a Developer ID + hardened runtime; copied as-is it becomes the main
+  executable of an unsealed wrapper and Gatekeeper then refuses the launch outright
+  ("<Name>.app is damaged and can't be opened"; `spctl`: "code has no resources but signature
+  indicates they must be present"). That broke every Claune after the first signed deploy
+  (v0.1.0, 2026-10-10). `BundleBuilder` therefore re-signs the copy with `codesign --force
+  --sign -` (`FileOps.adHocSign`). Launched wrappers also gain `com.apple.provenance` and, while
+  their main executable is Developer ID signed, App Management blocks in-place edits from other
+  processes ("Operation not permitted"); regenerating the bundle (resync) is the way to repair.
 - No approach that modifies the Claude bundle or re-signs is needed. Nothing to decide here.
 
 ### Auto-updater behaviour
