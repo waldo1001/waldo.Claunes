@@ -50,7 +50,7 @@ swift build                 # all targets (debug)
 swift test                  # 11+ unit tests, fake Claude.app, no side effects
 scripts/build-app.sh release   # -> build/waldo.Claunes.app (ad-hoc signed)
 scripts/release.sh "Developer ID Application: Dynex (92A2K3Q7NH)" [claunes]  # Developer ID sign (+ notarize with the keychain profile)
-scripts/deploy.sh               # build + sign + install to /Applications + resync stopped Claunes + launch (the usual update path)
+scripts/deploy.sh               # install latest GitHub release (verified) + resync stopped Claunes + launch; --local builds from source
 .build/debug/claunes doctor    # checks paths and the installed Claude
 ```
 CI: `.github/workflows/ci.yml` (build + test + unsigned app artifact on push/PR). Release: push tag `v$(cat VERSION)`;

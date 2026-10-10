@@ -32,13 +32,15 @@ page: unzip, move `waldo.Claunes.app` to `/Applications`, open it. Or build from
 ```sh
 git clone https://github.com/waldo1001/waldo.Claunes.git
 cd waldo.Claunes
-scripts/deploy.sh             # builds, signs (Developer ID if present), installs to /Applications, resyncs Claunes, launches
+scripts/deploy.sh             # installs the latest signed release from GitHub, resyncs Claunes, launches
 ```
 
-`scripts/deploy.sh` is the normal way to update your own Mac: it quits the running app,
-moves the previous install to the Trash, copies the new build in and regenerates stopped
-Claunes so they get the new launcher; running Claunes repair themselves at their next
-launch. Options: `--identity "..."`, `--dest ~/Applications`, `--no-launch`.
+`scripts/deploy.sh` is the normal way to update your own Mac: it downloads the release zip
+from GitHub, checks its SHA-256, the Developer ID team and Gatekeeper acceptance, quits the
+running app, moves the previous install to the Trash, copies the new app in and regenerates
+stopped Claunes so they get the new launcher; running Claunes repair themselves at their next
+launch. Options: `--version X.Y.Z`, `--local` (build and sign from source instead,
+optionally with `--identity "..."`), `--dest ~/Applications`, `--no-launch`.
 
 Or build only: `scripts/build-app.sh release` produces `build/waldo.Claunes.app`.
 Tests: `swift test`. Command line interface (same core, handy for scripting):
