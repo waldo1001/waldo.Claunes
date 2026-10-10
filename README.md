@@ -33,8 +33,13 @@ Or build only: `scripts/build-app.sh release` produces `build/waldo.Claunes.app`
 Tests: `swift test`. Command line interface (same core, handy for scripting):
 `build/waldo.Claunes.app/Contents/MacOS/claunes list|create|launch|resync|rename|delete|migrate|doctor`.
 
-The app is ad-hoc signed. On first launch macOS may ask you to confirm opening it (it is
-not notarized; it never leaves your machine).
+A local build is ad-hoc signed; macOS may ask you to confirm opening it. Release builds
+are signed with a Developer ID and notarized:
+
+```sh
+xcrun notarytool store-credentials claunes --apple-id you@example.com --team-id TEAMID --password app-specific-password   # once
+scripts/release.sh "Developer ID Application: Name (TEAMID)" claunes   # -> build/waldo.Claunes-<version>.zip
+```
 
 ## Use
 

@@ -47,6 +47,7 @@ use `FileOps.withWritable` around any change there.
 swift build                 # all targets (debug)
 swift test                  # 11+ unit tests, fake Claude.app, no side effects
 scripts/build-app.sh release   # -> build/waldo.Claunes.app (ad-hoc signed)
+scripts/release.sh "Developer ID Application: Dynex (92A2K3Q7NH)" [claunes]  # Developer ID sign (+ notarize with the keychain profile)
 .build/debug/claunes doctor    # checks paths and the installed Claude
 ```
 Smoke test by hand only with Claunes named `Test-*`; delete them afterwards (CLI `delete` or the app).
