@@ -257,3 +257,50 @@ Claune; local Chrome pairing is off in Claunes.
 - `shim/probe.swift`, `iconprobe.swift`, `handlerprobe.swift`, `sethandler.swift`: the probes
   used for `_NSGetExecutablePath`/`Bundle.main`, running-app icon sampling, and the
   `claude://` handler.
+
+### Drift repair must never run inside the launcher (2026-10-10 incident)
+
+Commit 63ed715 made the launcher rebuild its own bundle when it detected drift: assemble a new
+bundle next to the old one, move the old one (the one it was running from) to the Trash, swap,
+`execv` the regenerated launcher, which then `execv`s Claude. Three minutes after two such
+repairs launchd (pid 1) died with SIGBUS in an endpoint-event error path and the Mac panicked
+(`initproc exited -- exit reason namespace 2 subcode 0xa`). Causality is not proven; the design
+is wrong regardless. What the logs show:
+
+- `domain exec event` / `removing child: pid/N` / `could not find endpoint in pid namespace:
+  name = com.apple.axserver` are **normal for every Claune launch**: launchd lazily creates a
+  per-pid domain for the launcher, tears it down on `execv` and creates a new one once Claude
+  talks to it (~300 ms later). A single-exec launch (Test-Exec, pid 19047) logs exactly the same
+  lines. An accessibility client looking up the AX server in that gap gets ESRCH; harmless.
+- What was unique to the repair: the pid's *responsible process* and LaunchServices/RunningBoard
+  record stayed bound to the launcher file that had moved to the Trash, while the binary ran
+  from the new bundle. tccd evaluated the app's static code at
+  `~/.Trash/iFacto.Dev.app 13-02-04-902.app` for every permission check of the session
+  (`responsible_path=.../.Trash/.../ClauneLauncher`, `binary_path=.../Claunes/iFacto.Dev.app/...`).
+  Two execs across two different bundles and a 2 s window without any pid domain.
+- Helpers resolve their paths from the realpath of the running Claude binary at spawn time, so
+  they ran from the *new* bundle; only the identity bookkeeping pointed into the Trash.
+- `ClauneManager`'s running guards (`Runtime.isRunning`, LaunchServices view) did not help
+  because the launcher called `BundleBuilder.build` directly. They would have refused: the
+  launcher pid is registered under the Claune's bundle id from the moment LaunchServices
+  spawns it (`application.be.waldo.claunes.profile.<uuid>` in the launchd log).
+
+Rules, enforced in code and tests:
+
+1. `BundleBuilder.build` refuses (`BuildError.inUse`) while **any** process executes from the
+   bundle, checked twice (before assembling and right before the swap) through `ProcessScan`
+   (`proc_listallpids` + `proc_pidpath`, so the caller's own pid counts). `resync`, `update`
+   and `delete` check the same way. No live bundle is ever moved.
+2. Drift is repaired **before** a launch by the app or the CLI (`ClauneManager.repairIfNeeded`,
+   called by `AppModel.launch` and `claunes launch`).
+3. The launcher does exactly one `execv`, from a bundle that does not move. When it detects
+   drift it starts `claunes relaunch <id> --after-pid <pid>` from the installed app, detached
+   (own session), and exits. The CLI waits for the pid, repairs, launches via LaunchServices
+   with `--claune-repaired`; the fresh launcher sees the marker, strips it and never hands off
+   again (no loop). No installed app, or one too old to answer `relaunch --probe`: the launcher
+   runs the clone it has, complete but older.
+
+User experience when Claude Desktop updates: from waldo.Claunes the Claune starts fresh at once.
+From the Dock/Spotlight the icon bounces, the launcher exits, and about a second later the Claune
+opens from the regenerated bundle. A Claune that was already running keeps its old clone until it
+is quit and started again.

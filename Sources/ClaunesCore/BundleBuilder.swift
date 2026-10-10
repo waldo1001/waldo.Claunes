@@ -27,10 +27,12 @@ public struct BundleBuilder {
     public enum BuildError: Error, LocalizedError {
         case launcherMissing(URL)
         case plistWrite(URL)
+        case inUse(String, [pid_t])
         public var errorDescription: String? {
             switch self {
             case .launcherMissing(let u): return "Launcher binary not found at \(u.path)."
             case .plistWrite(let u): return "Could not write \(u.path)."
+            case .inUse(let n, let p): return "\(n) is running (pid \(p.map(String.init).joined(separator: ", "))). Quit it first."
             }
         }
     }
@@ -43,17 +45,27 @@ public struct BundleBuilder {
             throw BuildError.launcherMissing(launcherBinary)
         }
         let app = paths.appBundle(for: claune)
+        // Never rebuild a bundle with a live process in it (launcher, Claude or a helper): the swap below would move
+        // the bundle they run from to the Trash. Checked by pid, not via LaunchServices, so the launcher's own pid counts.
+        try refuseIfInUse(claune, app: app)
         return try FileOps.withWritable(paths.applicationsDir) {
             // Build in a temp dir next to the target, then swap, so a crash never leaves a half bundle.
             let tmp = paths.applicationsDir.appendingPathComponent(".building-\(claune.id.uuidString).app", isDirectory: true)
             try? FileManager.default.removeItem(at: tmp)
             try assemble(claune, installation: installation, at: tmp)
+            // Re-check right before the swap: a launch may have happened while we were cloning.
+            do { try refuseIfInUse(claune, app: app) } catch { try? FileManager.default.removeItem(at: tmp); throw error }
             if FileManager.default.fileExists(atPath: app.path) {
                 try FileOps.trash(app)
             }
             try FileManager.default.moveItem(at: tmp, to: app)
             return app
         }
+    }
+
+    private func refuseIfInUse(_ claune: Claune, app: URL) throws {
+        let live = ProcessScan.pids(executingUnder: app)
+        if !live.isEmpty { throw BuildError.inUse(claune.name, live) }
     }
 
     private func assemble(_ claune: Claune, installation: ClaudeInstallation, at app: URL) throws {

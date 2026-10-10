@@ -12,15 +12,18 @@ records what works, what gets SIGKILLed, and why.
   `DriftDetector`, `Migration`, `Runtime`/`ProtocolHandler` (NSWorkspace, claude:// handler),
   `ClauneManager` (create/update/resync/delete).
 - `Sources/claune-launcher`: the binary copied into every Claune as `Contents/MacOS/ClauneLauncher`.
-  Repairs version drift, shows the first-launch sign-in hint, execs `Contents/MacOS/Claude`
+  Never rebuilds its own bundle (it IS a process of the Claune): on drift it hands off to the installed CLI
+  (`claunes relaunch`) and exits. Shows the first-launch sign-in hint, execs `Contents/MacOS/Claude`
   (symlink into the nested clone) with `--user-data-dir`.
 - `Sources/claunes`: CLI over the core (`list create launch resync rename delete migrate doctor handler icon`).
 - `Sources/ClaunesApp`: SwiftUI app. `AppModel` (main actor state), `MainWindow` (sidebar + detail,
   sheets), `MenuBar` (MenuBarExtra).
 - `Tests/ClaunesCoreTests`: XCTest against a fake Claude.app in a temp dir. Never touches the real app.
 - `scripts/build-app.sh [release]` assembles `build/waldo.Claunes.app`; `scripts/release.sh` signs/notarizes; `scripts/deploy.sh` installs on this Mac.
-- Launcher drift: every Claune's Info.plist stores `ClauneLauncherHash`; `DriftDetector` reports `.launcherOutdated` when the
-  installed app ships a different launcher, and the launcher repairs using the installed app's copy (found via bundle id `be.waldo.claunes`).
+- Drift repair (Claude update or a new launcher, `ClauneLauncherHash`) happens BEFORE a launch, in the app or the CLI
+  (`ClauneManager.repairIfNeeded`), or via the launcher hand-off `claunes relaunch <id> --after-pid <pid>` (launcher exits,
+  CLI waits for it, rebuilds, launches with `--claune-repaired`). `BundleBuilder.build`, `resync`, `update` and `delete` refuse
+  while any process executes from the bundle (`ProcessScan`, pid-based). A live bundle is never moved: see SPIKE.md, 2026-10-10.
 - `spike/`: Phase 0 throwaway scripts and probes (kept for reference).
 
 ## Bundle layout (G)

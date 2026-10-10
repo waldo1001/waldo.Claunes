@@ -148,8 +148,11 @@ final class AppModel: ObservableObject {
 
     func launch(_ c: Claune) {
         Task {
+            // Drift is repaired here, before the launch, never by the Claune's own launcher (SPIKE.md, drift repair).
+            do { _ = try manager?.repairIfNeeded(c) } catch { errorMessage = "Resync \(c.name): \(error.localizedDescription)" }
             do { try await Runtime.launchOrActivate(c, paths: paths) } catch { errorMessage = "Launch \(c.name): \(error.localizedDescription)" }
             refreshRunning()
+            refreshDrift()
         }
     }
 

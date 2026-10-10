@@ -22,7 +22,7 @@ public enum Runtime {
     }
 
     /// Launches via LaunchServices (so the launcher runs) or brings the running instance to the front.
-    public static func launchOrActivate(_ claune: Claune, paths: ClaunesPaths) async throws {
+    public static func launchOrActivate(_ claune: Claune, paths: ClaunesPaths, arguments: [String] = []) async throws {
         if let app = runningApplication(for: claune) {
             app.activate(options: [.activateIgnoringOtherApps])
             return
@@ -30,6 +30,7 @@ public enum Runtime {
         let url = paths.appBundle(for: claune)
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
+        config.arguments = arguments
         _ = try await NSWorkspace.shared.openApplication(at: url, configuration: config)
     }
 

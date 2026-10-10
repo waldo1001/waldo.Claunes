@@ -38,7 +38,7 @@ scripts/deploy.sh             # installs the latest signed release from GitHub, 
 `scripts/deploy.sh` is the normal way to update your own Mac: it downloads the release zip
 from GitHub, checks its SHA-256, the Developer ID team and Gatekeeper acceptance, quits the
 running app, moves the previous install to the Trash, copies the new app in and regenerates
-stopped Claunes so they get the new launcher; running Claunes repair themselves at their next
+stopped Claunes so they get the new launcher; running Claunes are repaired at their next
 launch. Options: `--version X.Y.Z`, `--local` (build and sign from source instead,
 optionally with `--identity "..."`), `--dest ~/Applications`, `--no-launch`.
 

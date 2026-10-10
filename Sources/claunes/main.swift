@@ -8,8 +8,9 @@ func usage() -> Never {
     usage: claunes <command> [args]
       list                         show all Claunes, running state, drift
       create <name> [#hex] [badge] create a Claune and its app bundle
-      launch <name>                launch or activate
-      resync <name|--all>          regenerate bundle(s) from the installed Claude
+      launch <name>                repair drift if needed, then launch or activate
+      resync <name|--all>          regenerate bundle(s) from the installed Claude (stopped Claunes only)
+      relaunch <uuid> --after-pid <pid>  used by a Claune's launcher: wait for it to exit, repair, launch
       rename <name> <new name>
       delete <name>                move app + data to the Trash (asks for confirmation)
       migrate <name>               import ~/Library/Application Support/Claude into <name>
@@ -30,6 +31,16 @@ func launcherURL() -> URL {
 }
 
 func fail(_ msg: String) -> Never { FileHandle.standardError.write("error: \(msg)\n".data(using: .utf8)!); exit(1) }
+
+/// Repairs drift (never while the Claune runs; BundleBuilder refuses too), then launches via LaunchServices.
+func repairThenLaunch(_ c: Claune, arguments: [String]) {
+    do { if try manager.repairIfNeeded(c) { print("repaired \(c.name)") } } catch { FileHandle.standardError.write("warning: repair of \(c.name) failed: \(error.localizedDescription); launching as is\n".data(using: .utf8)!) }
+    let sem = DispatchSemaphore(value: 0)
+    var failure: Error?
+    Task { do { try await Runtime.launchOrActivate(c, paths: paths, arguments: arguments) } catch { failure = error }; sem.signal() }
+    sem.wait()
+    if let f = failure { fail("\(f)") }
+}
 
 let args = Array(CommandLine.arguments.dropFirst())
 guard let cmd = args.first else { usage() }
@@ -60,17 +71,21 @@ do {
     case "launch":
         guard args.count == 2 else { usage() }
         let c = find(args[1])
-        let sem = DispatchSemaphore(value: 0)
-        var failure: Error?
-        Task { do { try await Runtime.launchOrActivate(c, paths: paths) } catch { failure = error }; sem.signal() }
-        sem.wait()
-        if let f = failure { fail("\(f)") }
+        repairThenLaunch(c, arguments: [])
         print("launched \(c.name)")
+    case "relaunch":
+        // Hand-off from a Claune's launcher (see Relaunch): it exits, we wait for it, repair, launch with the marker.
+        if args.count == 2, args[1] == "--probe" { exit(0) }
+        guard args.count == 4, args[2] == "--after-pid", let id = UUID(uuidString: args[1]), let pid = pid_t(args[3]), pid > 0 else { usage() }
+        guard let c = manager.store.claune(id: id) else { fail("no Claune with id \(id)") }
+        if !ProcessScan.waitForExit(pid: pid, timeout: 15) { fail("pid \(pid) did not exit; not touching \(c.name)") }
+        repairThenLaunch(c, arguments: [Relaunch.marker])
+        print("relaunched \(c.name)")
     case "resync":
         guard args.count == 2 else { usage() }
         let targets = args[1] == "--all" ? manager.store.claunes : [find(args[1])]
         for c in targets {
-            if Runtime.isRunning(c) { print("skipped \(c.name): running (repaired automatically at its next launch)"); continue }
+            if Runtime.isRunning(c) { print("skipped \(c.name): running (repaired at its next launch)"); continue }
             try manager.resync(c); print("resynced \(c.name)")
         }
     case "rename":

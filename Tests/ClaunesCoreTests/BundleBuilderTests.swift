@@ -151,6 +151,68 @@ final class BundleBuilderTests: XCTestCase {
         XCTAssertNotEqual(BundleBuilder.digest(of: copy), BundleBuilder.digest(of: signedSource), "re-signing changes the bytes of the copy")
     }
 
+    /// Regression for the 2026-10-10 incident: the launcher rebuilt the bundle it was itself running from, which
+    /// moved a live app bundle to the Trash. build() must refuse while ANY process executes from the bundle,
+    /// the Claune's own launcher included, and must leave the bundle untouched.
+    func testBuildRefusesWhileAProcessRunsFromTheBundle() throws {
+        let fm = FileManager.default
+        let inst = try ClaudeInstallation.locate(paths: paths)
+        let claune = Claune(name: "Test-Live", colorHex: "#2E7D32")
+        let app = try BundleBuilder(paths: paths, launcherBinary: launcher).build(claune, installation: inst)
+        let before = try XCTUnwrap(BundleBuilder.stamp(of: app))
+        // A process executing from inside the bundle, like the launcher or Claude itself.
+        let resident = app.appendingPathComponent("Contents/MacOS/resident")
+        try fm.copyItem(at: URL(fileURLWithPath: "/bin/sleep"), to: resident)
+        let p = Process(); p.executableURL = resident; p.arguments = ["30"]
+        try p.run()
+        defer { if p.isRunning { p.terminate(); p.waitUntilExit() } }
+        XCTAssertThrowsError(try BundleBuilder(paths: paths, launcherBinary: launcher).build(claune, installation: inst)) { error in
+            guard case BundleBuilder.BuildError.inUse(let name, let pids) = error else { return XCTFail("expected inUse, got \(error)") }
+            XCTAssertEqual(name, "Test-Live")
+            XCTAssertTrue(pids.contains(p.processIdentifier))
+        }
+        XCTAssertTrue(fm.fileExists(atPath: resident.path), "bundle must not have been moved or trashed")
+        XCTAssertEqual(BundleBuilder.stamp(of: app), before, "bundle must be untouched")
+        XCTAssertFalse(fm.fileExists(atPath: paths.applicationsDir.appendingPathComponent(".building-\(claune.id.uuidString).app").path), "no half-built bundle left behind")
+        p.terminate(); p.waitUntilExit()
+        XCTAssertNoThrow(try BundleBuilder(paths: paths, launcherBinary: launcher).build(claune, installation: inst), "rebuild works once the process is gone")
+    }
+
+    /// Drift is repaired by the app/CLI BEFORE a launch, never by the launcher of the running Claune.
+    func testRepairIfNeededRebuildsOnlyWhenDrifted() throws {
+        let manager = try ClauneManager(paths: paths, launcherBinary: launcher)
+        let claune = try manager.create(name: "Test-Repair")
+        XCTAssertFalse(try manager.repairIfNeeded(claune), "fresh bundle: nothing to do")
+        let plistURL = paths.claudeApp.appendingPathComponent("Contents/Info.plist")
+        var p = NSDictionary(contentsOf: plistURL) as! [String: Any]
+        p["CFBundleShortVersionString"] = "2.0.0"
+        (p as NSDictionary).write(to: plistURL, atomically: true)
+        XCTAssertEqual(manager.drift(claune).needsRebuild, true)
+        XCTAssertTrue(try manager.repairIfNeeded(claune), "outdated: rebuilt")
+        XCTAssertEqual(manager.drift(claune), .upToDate)
+        XCTAssertEqual(manager.store.claune(id: claune.id)?.generatedFromVersion, "2.0.0")
+    }
+
+    /// Rename and delete also move a bundle; they must refuse while a process runs from it (kernel view, not only LS).
+    func testUpdateAndDeleteRefuseWhileAProcessRunsFromTheBundle() throws {
+        let manager = try ClauneManager(paths: paths, launcherBinary: launcher)
+        let claune = try manager.create(name: "Test-Busy")
+        let app = paths.appBundle(for: claune)
+        let resident = app.appendingPathComponent("Contents/MacOS/resident")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/sleep"), to: resident)
+        let p = Process(); p.executableURL = resident; p.arguments = ["30"]
+        try p.run()
+        defer { if p.isRunning { p.terminate(); p.waitUntilExit() } }
+        var renamed = claune; renamed.name = "Test-Busy2"
+        XCTAssertThrowsError(try manager.update(renamed))
+        XCTAssertThrowsError(try manager.delete(claune))
+        XCTAssertFalse(try manager.repairIfNeeded(claune), "running: not repaired, not an error")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: resident.path), "bundle still in place")
+        XCTAssertNotNil(manager.store.claune(id: claune.id), "profile kept")
+        p.terminate(); p.waitUntilExit()
+        XCTAssertNoThrow(try manager.delete(claune))
+    }
+
     func testMigrationCopiesAndRefusesNonEmptyTarget() throws {
         let fm = FileManager.default
         XCTAssertNil(Migration.detectOriginalData(paths: paths))

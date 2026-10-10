@@ -1,7 +1,9 @@
 // claune-launcher: lives at <Claune>.app/Contents/MacOS/ClauneLauncher.
-// It resolves the Claune's data dir, repairs version drift when safe, then execs the real
-// Claude binary THROUGH the symlink inside this bundle (that keeps the Dock identity ours,
-// see SPIKE.md) with --user-data-dir.
+// It resolves the Claune's data dir, then execs the real Claude binary THROUGH the symlink inside this
+// bundle (that keeps the Dock identity ours, see SPIKE.md) with --user-data-dir. Exactly one exec, from a
+// bundle that does not move: this process IS a process of the Claune, so it never rebuilds the bundle it
+// runs from (the 2026-10-10 incident in SPIKE.md). Drift is repaired by waldo.Claunes before a launch, or
+// handed to the installed CLI, which waits for this pid to exit, rebuilds and launches the fresh bundle.
 import AppKit
 import ClaunesCore
 import Foundation
@@ -37,39 +39,33 @@ if let store = try? ProfileStore(paths: paths), let c = store.claune(id: clauneI
     dataDir = paths.dataDir(for: c)
 }
 
-// Drift repair: if Claude Desktop was updated since this bundle was generated, regenerate it
-// (an APFS clone, well under a second) before starting. Safe because we are the only process
-// of this Claune right now (we have not exec'd yet) and the launcher binary itself is kept.
-/// The launcher shipped by the installed waldo.Claunes app, if the app is installed.
+// Arguments LaunchServices passed us (Dock, Spotlight, `open`, or the CLI after a repair).
+let (forwardedArgs, repaired) = Relaunch.strip(Array(CommandLine.arguments.dropFirst()))
+
+/// The installed waldo.Claunes app, if any.
+func installedApp() -> URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: "be.waldo.claunes") }
+/// The launcher that app ships (drift comparison) and its CLI (repair hand-off).
 func installedAppLauncher() -> URL? {
-    guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "be.waldo.claunes") else { return nil }
-    let url = app.appendingPathComponent("Contents/MacOS/claune-launcher")
-    return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
+    guard let url = installedApp()?.appendingPathComponent("Contents/MacOS/claune-launcher"),
+          FileManager.default.isExecutableFile(atPath: url.path) else { return nil }
+    return url
+}
+func installedCLI() -> URL? {
+    guard let url = installedApp()?.appendingPathComponent("Contents/MacOS/claunes"),
+          FileManager.default.isExecutableFile(atPath: url.path) else { return nil }
+    return url
 }
 
-if let c = claune, let installation = try? ClaudeInstallation.locate(paths: paths) {
-    let appLauncher = installedAppLauncher()
-    let state = DriftDetector.check(c, paths: paths, installation: installation, launcherBinary: appLauncher)
-    if state == .launcherOutdated || { if case .outdated = state { return true } else { return false } }() {
-        let launcherCopy = contents.appendingPathComponent("MacOS/\(BundleBuilder.launcherExecutableName)")
-        // Source for the new bundle's launcher: the installed app's copy (so launcher fixes propagate),
-        // else a copy of ourselves set aside first, because build() trashes the old bundle including this file.
-        let tmpLauncher = FileManager.default.temporaryDirectory.appendingPathComponent("claune-launcher-\(UUID().uuidString)")
-        do {
-            try FileManager.default.copyItem(at: appLauncher ?? launcherCopy, to: tmpLauncher)
-            try BundleBuilder(paths: paths, launcherBinary: tmpLauncher).build(c, installation: installation)
-            try? FileManager.default.removeItem(at: tmpLauncher)
-            // Exec the freshly generated launcher (same path, new file). Not via LaunchServices:
-            // LS already considers this bundle id running (that is us) and would only activate it.
-            let fresh = launcherCopy.path
-            let cargs = ([fresh] + CommandLine.arguments.dropFirst()).map { strdup($0) } + [nil]
-            execv(fresh, cargs)
-            FileHandle.standardError.write("claune-launcher: exec of regenerated launcher failed: \(String(cString: strerror(errno)))\n".data(using: .utf8)!)
-        } catch {
-            // Fall through and run the old clone; the main app offers Resync.
-            FileHandle.standardError.write("claune-launcher: resync failed: \(error)\n".data(using: .utf8)!)
-        }
+// Drift hand-off. Never a rebuild from here: that moved the live bundle to the Trash and left this pid
+// attributed to a bundle in the Trash (see SPIKE.md). `repaired` breaks the loop when the CLI relaunched us.
+if !repaired, let c = claune, let installation = try? ClaudeInstallation.locate(paths: paths) {
+    let state = DriftDetector.check(c, paths: paths, installation: installation, launcherBinary: installedAppLauncher())
+    let drifted: Bool = { if case .outdated = state { return true }; return state == .launcherOutdated }()
+    if drifted, let cli = installedCLI(), Relaunch.cliSupportsRelaunch(cli),
+       Relaunch.spawnDetached(cli, arguments: ["relaunch", c.id.uuidString, "--after-pid", String(getpid())]) != nil {
+        exit(0)   // the CLI waits for this pid, rebuilds, and launches the fresh bundle with the marker
     }
+    // No installed app (or an older one): run the clone we have. It is complete and works, just older.
 }
 
 let target = contents.appendingPathComponent("MacOS/Claude").path   // symlink into the nested clone
@@ -98,7 +94,7 @@ if !FileManager.default.fileExists(atPath: dataDir.appendingPathComponent("Cooki
     }
 }
 var args: [String] = [target, "--user-data-dir=\(dataDir.path)"]
-args.append(contentsOf: CommandLine.arguments.dropFirst())
+args.append(contentsOf: forwardedArgs)
 let cargs = args.map { strdup($0) } + [nil]
 execv(target, cargs)
 alert("Could not start Claude", "execv failed: \(String(cString: strerror(errno)))")
