@@ -56,12 +56,14 @@ public enum IconGenerator {
         let px = CGFloat(pixels)
         base.draw(in: NSRect(x: 0, y: 0, width: px, height: px), from: .zero, operation: .copy, fraction: 1)
         // Badge: circle in the bottom-right corner, white ring, profile color, white letter(s).
-        let d = px * 0.46
-        let circle = NSRect(x: px * 0.74 - d / 2, y: px * 0.26 - d / 2, width: d, height: d)
+        // It stays inside Claude's tile (100 px margin on 1024): anything outside the icon shape makes
+        // macOS 26 shrink the icon onto a gray backing tile.
+        let d = px * 0.34
+        let circle = NSRect(x: px * 0.715 - d / 2, y: px * 0.285 - d / 2, width: d, height: d)
         NSColor.white.setFill()
         NSBezierPath(ovalIn: circle).fill()
         color(fromHex: colorHex).setFill()
-        NSBezierPath(ovalIn: circle.insetBy(dx: px * 0.025, dy: px * 0.025)).fill()
+        NSBezierPath(ovalIn: circle.insetBy(dx: px * 0.02, dy: px * 0.02)).fill()
         let text = badge.isEmpty ? "C" : badge
         let font = NSFont.systemFont(ofSize: d * (text.count > 1 ? 0.40 : 0.55), weight: .bold)
         let paragraph = NSMutableParagraphStyle()

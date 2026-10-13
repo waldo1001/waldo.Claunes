@@ -271,6 +271,19 @@ final class BundleBuilderTests: XCTestCase {
         XCTAssertLessThan(min(badge.blueComponent, ring.blueComponent), 0.3)
     }
 
+    /// macOS 26 boxes an icon in a gray tile when anything is drawn outside the icon shape, so the badge
+    /// must stay inside Claude's tile (1024 canvas, 822 tile, 100 px margin, like the real electron.icns).
+    func testBadgeStaysInsideClaudeIconShape() throws {
+        let base = IconGenerator.tile(badge: " ", colorHex: "#0000FF", pixels: 256, inset: 100.0 / 1024)
+        let baseRep = NSBitmapImageRep(data: try IconGenerator.pngData(base))!
+        let rep = NSBitmapImageRep(data: try IconGenerator.pngData(IconGenerator.icon(badge: "IF", colorHex: "#2E7D32", pixels: 256, base: base)))!
+        var outside = 0
+        for y in 0..<256 { for x in 0..<256 where baseRep.colorAt(x: x, y: y)!.alphaComponent < 0.02 {
+            if rep.colorAt(x: x, y: y)!.alphaComponent > 0.1 { outside += 1 }
+        } }
+        XCTAssertEqual(outside, 0, "pixels painted outside Claude's icon shape")
+    }
+
     func testIconFallsBackToTileWithoutClaudeIcon() throws {
         let rep = NSBitmapImageRep(data: try IconGenerator.pngData(IconGenerator.icon(badge: "W", colorHex: "#2E7D32", pixels: 64, base: nil)))!
         let top = srgb(rep, 0.5, 0.15)
