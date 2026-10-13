@@ -1,8 +1,9 @@
 import AppKit
 import Foundation
 
-/// Draws the Claune icon: a Claude-style rounded tile in the profile color with the badge.
-/// Generated programmatically; no Anthropic artwork is used.
+/// Draws the Claune icon: Claude's own icon, read from the installed Claude.app and drawn unmodified,
+/// with a corner badge in the profile color. Without that icon: a rounded tile in the profile color.
+/// No Anthropic artwork is shipped or altered.
 public enum IconGenerator {
     public static func color(fromHex hex: String) -> NSColor {
         var s = hex.trimmingCharacters(in: .whitespaces)
@@ -42,6 +43,39 @@ public enum IconGenerator {
         return image
     }
 
+    /// Claude's icon (`base`) as-is with a corner badge; the plain tile when `base` is nil.
+    public static func icon(badge: String, colorHex: String, pixels: Int, base: NSImage?) -> NSImage {
+        guard let base else { return tile(badge: badge, colorHex: colorHex, pixels: pixels) }
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8,
+                                   samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                   bytesPerRow: 0, bitsPerPixel: 0)!
+        rep.size = NSSize(width: pixels, height: pixels)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        let px = CGFloat(pixels)
+        base.draw(in: NSRect(x: 0, y: 0, width: px, height: px), from: .zero, operation: .copy, fraction: 1)
+        // Badge: circle in the bottom-right corner, white ring, profile color, white letter(s).
+        let d = px * 0.46
+        let circle = NSRect(x: px * 0.74 - d / 2, y: px * 0.26 - d / 2, width: d, height: d)
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: circle).fill()
+        color(fromHex: colorHex).setFill()
+        NSBezierPath(ovalIn: circle.insetBy(dx: px * 0.025, dy: px * 0.025)).fill()
+        let text = badge.isEmpty ? "C" : badge
+        let font = NSFont.systemFont(ofSize: d * (text.count > 1 ? 0.40 : 0.55), weight: .bold)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        let str = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: NSColor.white, .paragraphStyle: paragraph])
+        let bounds = str.boundingRect(with: circle.size, options: [.usesLineFragmentOrigin])
+        let origin = NSPoint(x: circle.midX - bounds.width / 2, y: circle.midY - bounds.height / 2 - bounds.minY)
+        str.draw(with: NSRect(origin: origin, size: bounds.size), options: [.usesLineFragmentOrigin])
+        NSGraphicsContext.restoreGraphicsState()
+        let image = NSImage(size: NSSize(width: pixels, height: pixels))
+        image.addRepresentation(rep)
+        return image
+    }
+
     public static func pngData(_ image: NSImage) throws -> Data {
         guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else {
@@ -51,7 +85,9 @@ public enum IconGenerator {
     }
 
     /// Writes an .icns using /usr/bin/iconutil (present on every Mac).
-    public static func writeICNS(badge: String, colorHex: String, to url: URL) throws {
+    /// `baseIcon`: Claude's icon file; when given and readable, the icon is that icon with a corner badge.
+    public static func writeICNS(badge: String, colorHex: String, baseIcon: URL? = nil, to url: URL) throws {
+        let base = baseIcon.flatMap { NSImage(contentsOf: $0) }
         let fm = FileManager.default
         let iconset = fm.temporaryDirectory.appendingPathComponent("claune-\(UUID().uuidString).iconset", isDirectory: true)
         try fm.createDirectory(at: iconset, withIntermediateDirectories: true)
@@ -60,7 +96,7 @@ public enum IconGenerator {
                                       ("icon_128x128", 128), ("icon_128x128@2x", 256), ("icon_256x256", 256),
                                       ("icon_256x256@2x", 512), ("icon_512x512", 512), ("icon_512x512@2x", 1024)]
         for (name, px) in sizes {
-            try pngData(tile(badge: badge, colorHex: colorHex, pixels: px)).write(to: iconset.appendingPathComponent("\(name).png"))
+            try pngData(icon(badge: badge, colorHex: colorHex, pixels: px, base: base)).write(to: iconset.appendingPathComponent("\(name).png"))
         }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")

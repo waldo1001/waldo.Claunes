@@ -176,10 +176,12 @@ struct DetailView: View {
 }
 
 struct IconPreview: View {
+    @EnvironmentObject var model: AppModel
     let badge: String
     let colorHex: String
     var body: some View {
-        let img = IconGenerator.tile(badge: badge, colorHex: colorHex, pixels: 256)
+        let base = model.installation?.iconURL.flatMap { NSImage(contentsOf: $0) }
+        let img = IconGenerator.icon(badge: badge, colorHex: colorHex, pixels: 256, base: base)
         Image(nsImage: img).resizable().frame(width: 96, height: 96)
     }
 }

@@ -45,6 +45,14 @@ public struct ClaudeInstallation: Equatable {
         try locate(at: paths.claudeApp)
     }
 
+    /// Claude's own app icon (CFBundleIconFile in Contents/Resources), if present. Used, unmodified, under the Claune badge.
+    public var iconURL: URL? {
+        guard var name = infoPlist["CFBundleIconFile"] as? String, !name.isEmpty else { return nil }
+        if (name as NSString).pathExtension.isEmpty { name += ".icns" }
+        let url = bundleURL.appendingPathComponent("Contents/Resources/\(name)")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
     /// Hash of app.asar as recorded by Electron, used for drift detection.
     public var asarHash: String? {
         (asarIntegrity?["Resources/app.asar"] as? [String: Any])?["hash"] as? String

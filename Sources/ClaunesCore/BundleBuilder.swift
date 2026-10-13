@@ -96,7 +96,8 @@ public struct BundleBuilder {
         }
 
         // 3. Icon.
-        try IconGenerator.writeICNS(badge: claune.badge, colorHex: claune.colorHex, to: resources.appendingPathComponent(BundleBuilder.iconFileName))
+        try IconGenerator.writeICNS(badge: claune.badge, colorHex: claune.colorHex, baseIcon: installation.iconURL,
+                                    to: resources.appendingPathComponent(BundleBuilder.iconFileName))
 
         // 4. Info.plist: Claude's, with our identity.
         var plist = installation.infoPlist

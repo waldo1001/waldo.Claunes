@@ -240,4 +240,50 @@ final class BundleBuilderTests: XCTestCase {
         XCTAssertLessThan(top.redComponent, 0.3)
         XCTAssertLessThan(top.blueComponent, 0.3)
     }
+
+    /// Gives the fake Claude.app an icon: a solid blue tile (stands in for Claude's real icon).
+    private func installFakeClaudeIcon() throws -> URL {
+        let url = paths.claudeApp.appendingPathComponent("Contents/Resources/electron.icns")
+        try IconGenerator.writeICNS(badge: " ", colorHex: "#0000FF", to: url)
+        return url
+    }
+
+    private func srgb(_ rep: NSBitmapImageRep, _ fx: CGFloat, _ fy: CGFloat) -> NSColor {
+        rep.colorAt(x: Int(fx * CGFloat(rep.pixelsWide)), y: Int(fy * CGFloat(rep.pixelsHigh)))!.usingColorSpace(.sRGB)!
+    }
+
+    func testInstallationExposesClaudeIconOnlyWhenPresent() throws {
+        XCTAssertNil(try ClaudeInstallation.locate(paths: paths).iconURL, "no icon file in the fake app yet")
+        let icon = try installFakeClaudeIcon()
+        XCTAssertEqual(try ClaudeInstallation.locate(paths: paths).iconURL?.path, icon.path)
+    }
+
+    func testIconIsClaudeIconUnmodifiedWithCornerBadge() throws {
+        let base = NSImage(contentsOf: try installFakeClaudeIcon())!
+        let rep = NSBitmapImageRep(data: try IconGenerator.pngData(IconGenerator.icon(badge: "W", colorHex: "#2E7D32", pixels: 128, base: base)))!
+        XCTAssertEqual(rep.pixelsWide, 128)
+        let topLeft = srgb(rep, 0.25, 0.25)   // colorAt is top-left origin
+        XCTAssertGreaterThan(topLeft.blueComponent, 0.8, "Claude's icon is drawn as-is")
+        XCTAssertLessThan(topLeft.greenComponent, 0.2)
+        let badge = srgb(rep, 0.74, 0.74)      // bottom-right corner badge, off the letter
+        let ring = srgb(rep, 0.74, 0.60)
+        XCTAssertTrue(badge.greenComponent > 0.4 || ring.greenComponent > 0.4, "corner badge in the profile color")
+        XCTAssertLessThan(min(badge.blueComponent, ring.blueComponent), 0.3)
+    }
+
+    func testIconFallsBackToTileWithoutClaudeIcon() throws {
+        let rep = NSBitmapImageRep(data: try IconGenerator.pngData(IconGenerator.icon(badge: "W", colorHex: "#2E7D32", pixels: 64, base: nil)))!
+        let top = srgb(rep, 0.5, 0.15)
+        XCTAssertGreaterThan(top.greenComponent, 0.4)
+        XCTAssertLessThan(top.blueComponent, 0.3)
+    }
+
+    func testBuiltClauneIconUsesInstalledClaudeIcon() throws {
+        _ = try installFakeClaudeIcon()
+        let inst = try ClaudeInstallation.locate(paths: paths)
+        let app = try BundleBuilder(paths: paths, launcherBinary: launcher).build(Claune(name: "Test-Icon", colorHex: "#2E7D32"), installation: inst)
+        let icns = NSImage(contentsOf: app.appendingPathComponent("Contents/Resources/Claune.icns"))!
+        let rep = NSBitmapImageRep(data: try IconGenerator.pngData(icns))!
+        XCTAssertGreaterThan(srgb(rep, 0.25, 0.25).blueComponent, 0.8)
+    }
 }
