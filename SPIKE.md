@@ -385,3 +385,33 @@ Test-R (4.4212.0): LaunchServices name/bundle id/path ours, `codesign -dv <pid>`
 92A2K3Q7NH, window in < 1 s, no crash, no prompt on relaunch.
 
 Open: the shared Chrome native-host manifest is still taken over by whichever Claune (or Claude) started last.
+Fixed the same day, see the next section.
+
+### Chrome native host: the manifest always belongs to the original Claude (2026-10-30)
+
+How Claude handles it (app.asar of 4.4212.0, minified names): at start (`L$r`) it deletes the manifest in Brave,
+Chromium, Arc, Vivaldi and Opera, then for Chrome, Edge, Prisma Access Browser and Island (`PB()`) writes
+`<browser>/NativeMessagingHosts/com.anthropic.claude_browser_extension.json` when the extension is installed in a
+profile there (removes it otherwise), with `path` = `dirname(dirname(exe))/Helpers/chrome-native-host`, i.e. its own
+bundle. The same sync re-runs (500 ms debounce) only when a watcher sees a change under `<profile>/Extensions/<extension id>`
+(an extension install or update), never for a change of the manifest itself; and on a change of the Chrome bridge setting.
+
+Decision: the original `/Applications/Claude.app` always owns the manifest; no per-instance setting. A Claune cannot
+use Claude in Chrome anyway: its relocated user data sets `localPairingDisabledReason = "userData relocated"`, so its
+native host would only take the extension away from the real Claude.
+
+Implementation (`NativeMessagingHost` in ClaunesCore, launcher): just before it execs Claude, the launcher spawns itself
+detached as `ClauneLauncher --claune-native-host-guard <own pid>` (that pid becomes Claude's). The guard checks the four
+manifests every second and rewrites only `path`, only when it points inside `~/Applications/Claunes`, and only when
+`/Applications/Claude.app/Contents/Helpers/chrome-native-host` exists; all other keys are kept. It exits on the
+kqueue exit event of that pid, so it lives exactly as long as the Claune and the bundle is free (ProcessScan) once Claude
+quits. Why no loop: the real Claude never reacts to a manifest write, and the guard never touches a manifest that does
+not point into a Claune, so the real Claude's own write is final. Several Claunes: each guard writes the same value.
+Window: up to 1 s after a Claune (re)writes, the extension would spawn the Claune's helper.
+
+Verified: XCTest (`NativeMessagingHostTests`, temp dirs, fake process via `sleep`); guard mode of the built launcher
+against the real Chrome manifest pointed at a fake `Test-NMH` Claune: restored within 1 s, guard gone with the pid,
+original bytes put back. Not yet verified: a full Claune launch from LaunchServices (drift hand-off and first-launch alert
+make a debug-built `Test-*` Claune awkward); check after the next release with a `Test-*` Claune and
+`grep path ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_browser_extension.json`.
+

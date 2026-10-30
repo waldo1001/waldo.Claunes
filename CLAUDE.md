@@ -8,13 +8,15 @@ records what works, what gets SIGKILLed, and why.
 
 - `Sources/ClaunesCore`: all logic, no UI. `Claune`/`ProfilesDocument` model, `ClaunesPaths`,
   `ProfileStore` (profiles.json), `ClaudeInstallation` (facts about /Applications/Claude.app),
-  `IconGenerator`, `FileOps` (clonefile, trash, chmod, xattr), `BundleBuilder` (layout R), `CodeSigner` (re-sign),
+  `IconGenerator`, `FileOps` (clonefile, trash, chmod, xattr), `NativeMessagingHost` (Claude in Chrome manifest guard), `BundleBuilder` (layout R), `CodeSigner` (re-sign),
   `DriftDetector`, `Migration`, `Runtime`/`ProtocolHandler` (NSWorkspace, claude:// handler),
   `ClauneManager` (create/update/resync/delete).
 - `Sources/claune-launcher`: the binary copied into every Claune as `Contents/MacOS/ClauneLauncher`.
   Never rebuilds its own bundle (it IS a process of the Claune): on drift it hands off to the installed CLI
   (`claunes relaunch`) and exits. Shows the first-launch sign-in hint, execs `Contents/MacOS/Claude`
-  (the re-signed binary next to it) with `--user-data-dir`.
+  (the re-signed binary next to it) with `--user-data-dir`. Just before the exec it spawns itself as
+  `--claune-native-host-guard <pid>` (`NativeMessagingHost`): while that Claude runs, the guard points the shared Claude in
+  Chrome manifests back at `/Applications/Claude.app` whenever they point into a Claune (SPIKE.md, Chrome native host).
 - `Sources/claunes`: CLI over the core (`list create launch resync rename delete migrate doctor handler icon`).
 - `Sources/ClaunesApp`: SwiftUI app. `AppModel` (main actor state), `MainWindow` (sidebar + detail,
   sheets), `MenuBar` (MenuBarExtra).
