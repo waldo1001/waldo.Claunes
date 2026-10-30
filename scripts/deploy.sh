@@ -54,7 +54,9 @@ else
   APP="$WORK/x/waldo.Claunes.app"
   echo "==> verify signature"
   codesign --verify --deep --strict "$APP"
-  codesign -dv "$APP" 2>&1 | grep -q "^TeamIdentifier=$TEAM_ID\$" || { echo "not signed by team $TEAM_ID"; exit 1; }
+  # Capture first: `codesign | grep -q` under pipefail fails at random (grep exits early, codesign gets SIGPIPE).
+  SIG=$(codesign -dv "$APP" 2>&1)
+  grep -q "^TeamIdentifier=$TEAM_ID\$" <<<"$SIG" || { echo "not signed by team $TEAM_ID"; exit 1; }
   spctl -a -t exec "$APP" 2>/dev/null || { echo "Gatekeeper rejects the download (not notarized?)"; exit 1; }
   echo "    $VERSION, Developer ID $TEAM_ID, notarized"
 fi
