@@ -13,7 +13,10 @@ All throwaway bundles, data dirs and per-bundle caches were removed afterwards; 
 
 ## TL;DR
 
-**Recommended: the "nested pristine clone" wrapper.** Each Claune is
+> **Superseded 2026-10-30.** Layout G below stopped working with Claude 4.29.0 (Electron integrity-dictionary
+> digest). The shipped layout is now R, a re-signed flat clone: see the sections dated 2026-10-30 at the end.
+
+**Recommended (until 2026-10-30): the "nested pristine clone" wrapper.** Each Claune is
 `~/Applications/Claunes/<Name>.app`, a bundle we own (own Info.plist, bundle id, icon, a
 tiny launcher binary) that contains an *unmodified* APFS clone of Claude.app at
 `Contents/Claude.app`. The launcher execs the real Electron binary **through a symlink inside
@@ -358,3 +361,27 @@ untouched; `embedded.provisionprofile` removed; `xattr -cr`; `codesign --force -
   `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_browser_extension.json`
   to point at its own `Contents/Helpers/chrome-native-host`. A Claune therefore hijacks
   Claude in Chrome from the real Claude until the real one restarts (restored by hand after R).
+
+#### Experiment R2: same, signed with a local Developer ID (2026-10-30) - adopted as layout R
+
+`spike/resign.sh` with `Developer ID Application: Dynex (92A2K3Q7NH)`: inside-out over every Mach-O (loose
+files first, then .app/.framework bundles, deepest first, then the app), `--options runtime --timestamp=none`
+(no network), each component's entitlements read from the original minus `keychain-access-groups`,
+`com.apple.developer.*`, `com.apple.application-identifier`; nested code keeps its identifier, the app gets
+the Claune bundle id. Whole bundle in about 5 s; the re-signed Mach-O files are rewritten (copy-on-write),
+so a Claune costs about 620 MB on disk instead of ~0.
+
+- Designated requirement: `identifier "<bundle id>" and anchor apple generic and ... leaf[subject.OU] = "92A2K3Q7NH"`.
+- First launch: SecurityAgent asks for "Claude Safe Storage"; after "Always Allow", a rebuild from scratch
+  (new cdhash) launched with **no prompt and no keychain error**: the approval survives Claude updates.
+- `macOS VM-support probe: supported` (virtualization entitlement kept). Sandboxing as in the original.
+- `spctl -a` rejects it ("Unnotarized Developer ID"); irrelevant for a locally created, non-quarantined
+  bundle: LaunchServices launches it (verified repeatedly, Claude up within 1 s).
+
+Product implementation (BundleBuilder layout version 2, `CodeSigner`): the launcher is the main executable,
+`Contents/MacOS/Claude` sits next to it and is signed with the Claune identifier and Claude's filtered
+entitlements; `CFBundleName` stays "Claude"; `CFBundleDisplayName` carries the Claune name. Verified on
+Test-R (4.4212.0): LaunchServices name/bundle id/path ours, `codesign -dv <pid>` = Claune identifier + team
+92A2K3Q7NH, window in < 1 s, no crash, no prompt on relaunch.
+
+Open: the shared Chrome native-host manifest is still taken over by whichever Claune (or Claude) started last.

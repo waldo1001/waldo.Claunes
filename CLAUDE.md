@@ -8,13 +8,13 @@ records what works, what gets SIGKILLed, and why.
 
 - `Sources/ClaunesCore`: all logic, no UI. `Claune`/`ProfilesDocument` model, `ClaunesPaths`,
   `ProfileStore` (profiles.json), `ClaudeInstallation` (facts about /Applications/Claude.app),
-  `IconGenerator`, `FileOps` (clonefile, trash, chmod), `BundleBuilder` (layout G),
+  `IconGenerator`, `FileOps` (clonefile, trash, chmod, xattr), `BundleBuilder` (layout R), `CodeSigner` (re-sign),
   `DriftDetector`, `Migration`, `Runtime`/`ProtocolHandler` (NSWorkspace, claude:// handler),
   `ClauneManager` (create/update/resync/delete).
 - `Sources/claune-launcher`: the binary copied into every Claune as `Contents/MacOS/ClauneLauncher`.
   Never rebuilds its own bundle (it IS a process of the Claune): on drift it hands off to the installed CLI
   (`claunes relaunch`) and exits. Shows the first-launch sign-in hint, execs `Contents/MacOS/Claude`
-  (symlink into the nested clone) with `--user-data-dir`.
+  (the re-signed binary next to it) with `--user-data-dir`.
 - `Sources/claunes`: CLI over the core (`list create launch resync rename delete migrate doctor handler icon`).
 - `Sources/ClaunesApp`: SwiftUI app. `AppModel` (main actor state), `MainWindow` (sidebar + detail,
   sheets), `MenuBar` (MenuBarExtra).
@@ -26,21 +26,25 @@ records what works, what gets SIGKILLed, and why.
   while any process executes from the bundle (`ProcessScan`, pid-based). A live bundle is never moved: see SPIKE.md, 2026-10-10.
 - `spike/`: Phase 0 throwaway scripts and probes (kept for reference).
 
-## Bundle layout (G)
+## Bundle layout (R, since layout version 2)
 
 ```
-~/Applications/Claunes/<Name>.app/Contents/
-  Info.plist              ours (CFBundleIdentifier be.waldo.claunes.profile.<uuid>, ClauneID, ClauneSourceVersion,
-                          ElectronAsarIntegrity with BOTH keys "Resources/app.asar" and "Claude.app/Contents/Resources/app.asar")
-  MacOS/ClauneLauncher    our launcher
-  MacOS/Claude         -> ../Claude.app/Contents/MacOS/Claude
-  Frameworks           -> ../Claude.app/Contents/Frameworks
-  Resources/Claune.icns + one symlink per entry of ../Claude.app/Contents/Resources
-  Claude.app/             pristine APFS clone of /Applications/Claude.app. NEVER modify it.
+~/Applications/Claunes/<Name>.app/   APFS clone of /Applications/Claude.app, embedded.provisionprofile and xattrs removed
+  Contents/Info.plist      Claude's + CFBundleIdentifier be.waldo.claunes.profile.<uuid>, CFBundleDisplayName <Name>,
+                           CFBundleExecutable ClauneLauncher, CFBundleIconFile Claune.icns, Claune* keys.
+                           CFBundleName stays "Claude" (helper names); ElectronAsarIntegrity stays EXACTLY Claude's.
+  Contents/MacOS/ClauneLauncher   our launcher (main executable), execs MacOS/Claude
+  Contents/Resources/Claune.icns  our icon
+  everything re-signed inside-out (CodeSigner): local Developer ID if the keychain has one, else ad-hoc;
+  hardened runtime, each component's own entitlements minus restricted ones (keychain-access-groups,
+  com.apple.developer.*, com.apple.application-identifier); bundle and MacOS/Claude get identifier = bundle id.
 ```
-Why: Dock identity comes from the exec path (ours), signature validation from the real file
-(pristine), Chromium helper/sandbox paths from realpath (inside our bundle). Any modification
-of a notarized clone, or helpers outside the wrapper, breaks it (details in SPIKE.md).
+Why: Claude 4.29.0+ bakes a SHA-256 of the whole ElectronAsarIntegrity dictionary into its signed Electron
+Framework, which killed the old wrapper (layout G needed an extra key). A Developer ID gives a stable designated
+requirement, so the "Claude Safe Storage" keychain approval survives every rebuild. Lost vs. the original:
+Anthropic's keychain groups (webauthn/hardware key, Microsoft SSO sharing). Details: SPIKE.md, 2026-10-30.
+Tests always sign ad-hoc (`ClauneManager`/`BundleBuilder` default `signingIdentity: "-"`); only the app and CLI pass
+`CodeSigner.preferredIdentity()`. Never modify `/Applications/Claude.app` itself: only the clone is changed.
 
 Data: `~/Library/Application Support/waldo.Claunes/profiles.json` + `<uuid>/` per Claune.
 `~/Applications/Claunes` is kept mode 0555 so Claude's own ShipIt updater cannot replace a wrapper;

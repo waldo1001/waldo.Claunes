@@ -1,27 +1,29 @@
 import CryptoKit
 import Foundation
 
-/// Generates and refreshes the per-Claune app bundle (layout "G" from SPIKE.md):
+/// Generates and refreshes the per-Claune app bundle (layout "R" from SPIKE.md, 2026-10-30):
 ///
-///   <Name>.app/Contents/Info.plist        ours
-///   <Name>.app/Contents/MacOS/<exe>       claune-launcher
-///   <Name>.app/Contents/MacOS/Claude  ->  ../Claude.app/Contents/MacOS/Claude
-///   <Name>.app/Contents/Frameworks    ->  ../Claude.app/Contents/Frameworks
-///   <Name>.app/Contents/Resources/        Claune.icns + symlink per entry of the nested Resources
-///   <Name>.app/Contents/Claude.app/       pristine APFS clone of /Applications/Claude.app
+///   <Name>.app/                           APFS clone of /Applications/Claude.app, then:
+///   <Name>.app/Contents/Info.plist        Claude's, with our bundle id, display name, icon, launcher and Claune keys;
+///                                         ElectronAsarIntegrity untouched (Electron checks a digest of it)
+///   <Name>.app/Contents/MacOS/<exe>       claune-launcher (CFBundleExecutable), execs MacOS/Claude
+///   <Name>.app/Contents/Resources/        + Claune.icns
+///   everything re-signed inside-out with a local identity (CodeSigner)
 public struct BundleBuilder {
-    public static let layoutVersion = 1
+    public static let layoutVersion = 2
     public static let launcherExecutableName = "ClauneLauncher"
-    public static let nestedAppName = "Claude.app"
     public static let iconFileName = "Claune.icns"
 
     public let paths: ClaunesPaths
     /// The claune-launcher binary to copy into the bundle.
     public let launcherBinary: URL
+    /// `codesign --sign` identity for the whole bundle; "-" is ad-hoc (tests, Macs without a Developer ID).
+    public let signingIdentity: String
 
-    public init(paths: ClaunesPaths, launcherBinary: URL) {
+    public init(paths: ClaunesPaths, launcherBinary: URL, signingIdentity: String = "-") {
         self.paths = paths
         self.launcherBinary = launcherBinary
+        self.signingIdentity = signingIdentity
     }
 
     public enum BuildError: Error, LocalizedError {
@@ -71,48 +73,27 @@ public struct BundleBuilder {
     private func assemble(_ claune: Claune, installation: ClaudeInstallation, at app: URL) throws {
         let fm = FileManager.default
         let contents = app.appendingPathComponent("Contents", isDirectory: true)
-        let macos = contents.appendingPathComponent("MacOS", isDirectory: true)
-        let resources = contents.appendingPathComponent("Resources", isDirectory: true)
-        try fm.createDirectory(at: macos, withIntermediateDirectories: true)
-        try fm.createDirectory(at: resources, withIntermediateDirectories: true)
 
-        // 1. Pristine clone of Claude.app. Never modified afterwards.
-        let nested = contents.appendingPathComponent(BundleBuilder.nestedAppName, isDirectory: true)
-        try FileOps.clone(from: installation.bundleURL, to: nested)
+        // 1. Clone of Claude.app. Anthropic's provisioning profile and extended attributes go: our signature replaces theirs.
+        try FileOps.clone(from: installation.bundleURL, to: app)
+        try? fm.removeItem(at: contents.appendingPathComponent("embedded.provisionprofile"))
+        try FileOps.clearExtendedAttributes(app)
 
-        // 2. Launcher + symlinks. The copy is re-signed ad-hoc: a release build ships it Developer ID signed, and that
-        //    signature on the main executable of our unsealed wrapper makes Gatekeeper call the Claune "damaged".
-        let launcherCopy = macos.appendingPathComponent(BundleBuilder.launcherExecutableName)
-        try fm.copyItem(at: launcherBinary, to: launcherCopy)
-        try FileOps.adHocSign(launcherCopy)
-        try FileOps.symlink(at: macos.appendingPathComponent("Claude"), to: "../\(BundleBuilder.nestedAppName)/Contents/MacOS/Claude")
-        try FileOps.symlink(at: contents.appendingPathComponent("Frameworks"), to: "../\(BundleBuilder.nestedAppName)/Contents/Frameworks")
-        let nestedResources = nested.appendingPathComponent("Contents/Resources", isDirectory: true)
-        for entry in try fm.contentsOfDirectory(atPath: nestedResources.path) {
-            try FileOps.symlink(at: resources.appendingPathComponent(entry), to: "../\(BundleBuilder.nestedAppName)/Contents/Resources/\(entry)")
-        }
-        if let pkg = try? Data(contentsOf: installation.bundleURL.appendingPathComponent("Contents/PkgInfo")) {
-            try pkg.write(to: contents.appendingPathComponent("PkgInfo"))
-        }
+        // 2. Launcher next to Claude; it becomes the bundle's main executable.
+        try fm.copyItem(at: launcherBinary, to: contents.appendingPathComponent("MacOS/\(BundleBuilder.launcherExecutableName)"))
 
         // 3. Icon.
         try IconGenerator.writeICNS(badge: claune.badge, colorHex: claune.colorHex, baseIcon: installation.iconURL,
-                                    to: resources.appendingPathComponent(BundleBuilder.iconFileName))
+                                    to: contents.appendingPathComponent("Resources/\(BundleBuilder.iconFileName)"))
 
-        // 4. Info.plist: Claude's, with our identity.
+        // 4. Info.plist: Claude's, with our identity. CFBundleName stays "Claude" (Electron derives the helper app names
+        //    from it) and ElectronAsarIntegrity stays byte-for-byte Claude's (its digest is baked into Electron).
         var plist = installation.infoPlist
         plist["CFBundleExecutable"] = BundleBuilder.launcherExecutableName
-        plist["CFBundleName"] = claune.name
         plist["CFBundleDisplayName"] = claune.name
         plist["CFBundleIdentifier"] = claune.bundleIdentifier
         plist["CFBundleIconFile"] = BundleBuilder.iconFileName
         plist.removeValue(forKey: "CFBundleIconName")
-        plist.removeValue(forKey: "LSEnvironment") // not needed; keeps the plist honest
-        if var integrity = installation.asarIntegrity, let asar = integrity["Resources/app.asar"] {
-            // Electron looks the hash up by the asar path relative to our Contents (see SPIKE.md).
-            integrity["\(BundleBuilder.nestedAppName)/Contents/Resources/app.asar"] = asar
-            plist["ElectronAsarIntegrity"] = integrity
-        }
         plist["ClauneID"] = claune.id.uuidString
         plist["ClauneName"] = claune.name
         plist["ClauneDataDir"] = paths.dataDir(for: claune).path
@@ -123,6 +104,9 @@ public struct BundleBuilder {
         plist["ClauneGeneratedAt"] = ISO8601DateFormatter().string(from: Date())
         let plistURL = contents.appendingPathComponent("Info.plist")
         guard (plist as NSDictionary).write(to: plistURL, atomically: true) else { throw BuildError.plistWrite(plistURL) }
+
+        // 5. Seal it as the Claune (last: any change after this breaks the signature).
+        try CodeSigner(identity: signingIdentity).signClone(app, original: installation.bundleURL, identifier: claune.bundleIdentifier)
 
         try fm.createDirectory(at: paths.dataDir(for: claune), withIntermediateDirectories: true)
     }

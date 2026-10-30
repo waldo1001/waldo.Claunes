@@ -1,6 +1,6 @@
 // claune-launcher: lives at <Claune>.app/Contents/MacOS/ClauneLauncher.
-// It resolves the Claune's data dir, then execs the real Claude binary THROUGH the symlink inside this
-// bundle (that keeps the Dock identity ours, see SPIKE.md) with --user-data-dir. Exactly one exec, from a
+// It resolves the Claune's data dir, then execs the Claude binary next to it (Contents/MacOS/Claude, re-signed as
+// this Claune, layout R in SPIKE.md) with --user-data-dir; the pid stays, so the Dock identity stays ours. Exactly one exec, from a
 // bundle that does not move: this process IS a process of the Claune, so it never rebuilds the bundle it
 // runs from (the 2026-10-10 incident in SPIKE.md). Drift is repaired by waldo.Claunes before a launch, or
 // handed to the installed CLI, which waits for this pid to exit, rebuilds and launches the fresh bundle.
@@ -68,12 +68,12 @@ if !repaired, let c = claune, let installation = try? ClaudeInstallation.locate(
     // No installed app (or an older one): run the clone we have. It is complete and works, just older.
 }
 
-let target = contents.appendingPathComponent("MacOS/Claude").path   // symlink into the nested clone
+let target = contents.appendingPathComponent("MacOS/Claude").path
 guard FileManager.default.fileExists(atPath: target) else {
     if (try? ClaudeInstallation.locate(paths: paths)) == nil {
         alert("Claude Desktop is not installed", "waldo.Claunes runs the Claude Desktop app from /Applications/Claude.app. Install it, then resync this Claune.", openDownload: true)
     }
-    alert("Claune is damaged", "The embedded copy of Claude is missing. Open waldo.Claunes and use Resync.")
+    alert("Claune is damaged", "Its copy of Claude is missing. Open waldo.Claunes and use Resync.")
 }
 
 try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)

@@ -31,7 +31,7 @@ final class AppModel: ObservableObject {
 
     func start() {
         do {
-            manager = try ClauneManager(paths: paths, launcherBinary: AppModel.launcherURL)
+            manager = try ClauneManager(paths: paths, launcherBinary: AppModel.launcherURL, signingIdentity: CodeSigner.preferredIdentity())
         } catch {
             errorMessage = "Could not read profiles.json: \(error.localizedDescription)"
         }

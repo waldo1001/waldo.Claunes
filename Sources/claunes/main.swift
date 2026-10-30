@@ -46,7 +46,7 @@ let args = Array(CommandLine.arguments.dropFirst())
 guard let cmd = args.first else { usage() }
 let paths = ClaunesPaths.standard
 let manager: ClauneManager
-do { manager = try ClauneManager(paths: paths, launcherBinary: launcherURL()) } catch { fail("\(error)") }
+do { manager = try ClauneManager(paths: paths, launcherBinary: launcherURL(), signingIdentity: CodeSigner.preferredIdentity()) } catch { fail("\(error)") }
 
 func find(_ name: String) -> Claune {
     guard let c = manager.store.claunes.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else { fail("no Claune named \(name)") }

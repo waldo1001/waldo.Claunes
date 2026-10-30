@@ -4,7 +4,7 @@ import Foundation
 public enum DriftState: Equatable {
     /// Bundle is missing entirely.
     case missing
-    /// Bundle exists but is not one of ours (no ClauneID) or its nested clone is gone.
+    /// Bundle exists but is not one of ours (no ClauneID) or its Claude binary is gone.
     case corrupt(String)
     /// Generated from an older/newer Claude than the one installed, or older layout.
     case outdated(bundleVersion: String, installedVersion: String)
@@ -35,8 +35,8 @@ public enum DriftDetector {
         guard fm.fileExists(atPath: app.path) else { return .missing }
         guard let stamp = BundleBuilder.stamp(of: app) else { return .corrupt("Info.plist is not ours") }
         guard stamp.id == claune.id else { return .corrupt("belongs to another Claune") }
-        let nested = app.appendingPathComponent("Contents/\(BundleBuilder.nestedAppName)/Contents/MacOS/Claude")
-        guard fm.fileExists(atPath: nested.path) else { return .corrupt("nested Claude.app missing") }
+        let claude = app.appendingPathComponent("Contents/MacOS/Claude")
+        guard fm.fileExists(atPath: claude.path) else { return .corrupt("Claude binary missing") }
         let launcher = app.appendingPathComponent("Contents/MacOS/\(BundleBuilder.launcherExecutableName)")
         guard fm.isExecutableFile(atPath: launcher.path) else { return .corrupt("launcher missing") }
         if stamp.layoutVersion != BundleBuilder.layoutVersion

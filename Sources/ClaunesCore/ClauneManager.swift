@@ -12,11 +12,14 @@ public final class ClauneManager {
     public let paths: ClaunesPaths
     public let store: ProfileStore
     public let launcherBinary: URL
+    /// Identity every Claune is signed with. Default ad-hoc; the app and CLI pass `CodeSigner.preferredIdentity()`.
+    public let signingIdentity: String
 
-    public init(paths: ClaunesPaths, launcherBinary: URL) throws {
+    public init(paths: ClaunesPaths, launcherBinary: URL, signingIdentity: String = "-") throws {
         self.paths = paths
         self.store = try ProfileStore(paths: paths)
         self.launcherBinary = launcherBinary
+        self.signingIdentity = signingIdentity
     }
 
     /// Refuses when the Claune is running: LaunchServices view (bundle id) AND kernel view (any process executing from
@@ -29,7 +32,7 @@ public final class ClauneManager {
 
     public func installation() throws -> ClaudeInstallation { try ClaudeInstallation.locate(paths: paths) }
 
-    public var builder: BundleBuilder { BundleBuilder(paths: paths, launcherBinary: launcherBinary) }
+    public var builder: BundleBuilder { BundleBuilder(paths: paths, launcherBinary: launcherBinary, signingIdentity: signingIdentity) }
 
     /// Create the profile and its app bundle.
     @discardableResult

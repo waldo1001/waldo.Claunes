@@ -16,14 +16,29 @@ final class BundleBuilderTests: XCTestCase {
         // fake Claude.app
         let c = paths.claudeApp.appendingPathComponent("Contents")
         try fm.createDirectory(at: c.appendingPathComponent("MacOS"), withIntermediateDirectories: true)
-        try fm.createDirectory(at: c.appendingPathComponent("Frameworks/Electron Framework.framework"), withIntermediateDirectories: true)
         try fm.createDirectory(at: c.appendingPathComponent("Resources/en.lproj"), withIntermediateDirectories: true)
-        try "fake".write(to: c.appendingPathComponent("MacOS/Claude"), atomically: true, encoding: .utf8)
+        // Real Mach-O files, signed like Claude's: main binary with a restricted entitlement, a helper app, a native addon.
+        let mainBinary = root.appendingPathComponent("Claude-binary")   // signed outside the bundle, then moved in
+        try fm.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: mainBinary)
+        try sign(mainBinary, entitlements: ["com.apple.security.cs.allow-jit": true, "keychain-access-groups": ["Q6L2SF6YDW.x"],
+                                            "com.apple.developer.team-identifier": "Q6L2SF6YDW"])
+        try fm.moveItem(at: mainBinary, to: c.appendingPathComponent("MacOS/Claude"))
+        let helper = c.appendingPathComponent("Frameworks/Claude Helper.app/Contents")
+        try fm.createDirectory(at: helper.appendingPathComponent("MacOS"), withIntermediateDirectories: true)
+        try fm.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: helper.appendingPathComponent("MacOS/Claude Helper"))
+        (["CFBundleIdentifier": "com.anthropic.claudefordesktop.helper", "CFBundleExecutable": "Claude Helper", "CFBundlePackageType": "APPL"] as NSDictionary)
+            .write(to: helper.appendingPathComponent("Info.plist"), atomically: true)
+        try sign(helper.deletingLastPathComponent(), entitlements: ["com.apple.security.cs.allow-jit": true])
+        let addon = c.appendingPathComponent("Resources/app.asar.unpacked/native.node")
+        try fm.createDirectory(at: addon.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: addon)
+        try "provision".write(to: c.appendingPathComponent("embedded.provisionprofile"), atomically: true, encoding: .utf8)
         try "asar".write(to: c.appendingPathComponent("Resources/app.asar"), atomically: true, encoding: .utf8)
         try "APPL????".write(to: c.appendingPathComponent("PkgInfo"), atomically: true, encoding: .utf8)
         let plist: [String: Any] = ["CFBundleIdentifier": ClaudeInstallation.bundleIdentifier, "CFBundleShortVersionString": "1.0.0",
                                     "CFBundleExecutable": "Claude", "CFBundleName": "Claude", "CFBundleIconName": "Claude", "CFBundleIconFile": "electron.icns",
-                                    "ElectronAsarIntegrity": ["Resources/app.asar": ["algorithm": "SHA256", "hash": "abc"]],
+                                    "ElectronAsarIntegrity": ["Resources/app.asar": ["algorithm": "SHA256", "hash": "abc"],
+                                                              "Resources/ion-dist.asar": ["algorithm": "SHA256", "hash": "def"]],
                                     "LSEnvironment": ["MallocNanoZone": "0"]]
         (plist as NSDictionary).write(to: c.appendingPathComponent("Info.plist"), atomically: true)
         launcher = root.appendingPathComponent("launcher")
@@ -47,39 +62,79 @@ final class BundleBuilderTests: XCTestCase {
         XCTAssertEqual(inst.asarHash, "abc")
     }
 
-    func testBuildProducesLayoutG() throws {
+    func testBuildProducesLayoutR() throws {
         let fm = FileManager.default
         let inst = try ClaudeInstallation.locate(paths: paths)
         let claune = Claune(name: "Test-Work", colorHex: "#2E7D32")
         let app = try BundleBuilder(paths: paths, launcherBinary: launcher).build(claune, installation: inst)
         XCTAssertEqual(app.lastPathComponent, "Test-Work.app")
         let c = app.appendingPathComponent("Contents")
-        XCTAssertTrue(fm.fileExists(atPath: c.appendingPathComponent("Claude.app/Contents/MacOS/Claude").path), "nested pristine clone")
+        // A flat clone: real files, no nested Claude.app, no symlinks into one.
+        XCTAssertFalse(fm.fileExists(atPath: c.appendingPathComponent("Claude.app").path), "no nested clone in layout R")
+        XCTAssertNil(try? fm.destinationOfSymbolicLink(atPath: c.appendingPathComponent("MacOS/Claude").path), "MacOS/Claude is the real binary")
+        XCTAssertTrue(fm.isExecutableFile(atPath: c.appendingPathComponent("MacOS/Claude").path))
         XCTAssertTrue(fm.isExecutableFile(atPath: c.appendingPathComponent("MacOS/ClauneLauncher").path))
-        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: c.appendingPathComponent("MacOS/Claude").path), "../Claude.app/Contents/MacOS/Claude")
-        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: c.appendingPathComponent("Frameworks").path), "../Claude.app/Contents/Frameworks")
-        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: c.appendingPathComponent("Resources/app.asar").path), "../Claude.app/Contents/Resources/app.asar")
+        XCTAssertTrue(fm.fileExists(atPath: c.appendingPathComponent("Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper").path))
         XCTAssertTrue(fm.fileExists(atPath: c.appendingPathComponent("Resources/Claune.icns").path))
+        XCTAssertFalse(fm.fileExists(atPath: c.appendingPathComponent("embedded.provisionprofile").path), "Anthropic's profile does not match our signature")
         let plist = NSDictionary(contentsOf: c.appendingPathComponent("Info.plist")) as! [String: Any]
         XCTAssertEqual(plist["CFBundleIdentifier"] as? String, claune.bundleIdentifier)
         XCTAssertEqual(plist["CFBundleExecutable"] as? String, "ClauneLauncher")
-        XCTAssertEqual(plist["CFBundleName"] as? String, "Test-Work")
+        XCTAssertEqual(plist["CFBundleDisplayName"] as? String, "Test-Work")
+        XCTAssertEqual(plist["CFBundleName"] as? String, "Claude", "Electron derives the helper app names from CFBundleName")
         XCTAssertEqual(plist["CFBundleIconFile"] as? String, "Claune.icns")
         XCTAssertNil(plist["CFBundleIconName"])
-        let integrity = plist["ElectronAsarIntegrity"] as! [String: Any]
-        XCTAssertNotNil(integrity["Resources/app.asar"])
-        XCTAssertEqual((integrity["Claude.app/Contents/Resources/app.asar"] as? [String: Any])?["hash"] as? String, "abc")
+        // Electron checks a digest of the whole dictionary: it must be Claude's, byte for byte (SPIKE.md, 2026-10-30).
+        XCTAssertEqual(plist["ElectronAsarIntegrity"] as? NSDictionary, inst.asarIntegrity.map { $0 as NSDictionary })
         XCTAssertEqual(plist["ClauneID"] as? String, claune.id.uuidString)
         XCTAssertEqual(plist["ClauneDataDir"] as? String, paths.dataDir(for: claune).path)
+        XCTAssertEqual(plist["ClauneLayoutVersion"] as? Int, 2)
         XCTAssertTrue(fm.fileExists(atPath: paths.dataDir(for: claune).path))
-        // the nested clone is untouched
-        let nestedPlist = NSDictionary(contentsOf: c.appendingPathComponent("Claude.app/Contents/Info.plist")) as! [String: Any]
-        XCTAssertEqual(nestedPlist["CFBundleIdentifier"] as? String, ClaudeInstallation.bundleIdentifier)
+        // Sealed and signed as the Claune.
+        XCTAssertEqual(codesign(["--verify", "--deep", "--strict", app.path]).status, 0, codesign(["--verify", "--deep", "--strict", app.path]).output)
+        XCTAssertTrue(codesign(["-dv", app.path]).output.contains("Identifier=\(claune.bundleIdentifier)"))
+        // The installed Claude is untouched.
+        let source = NSDictionary(contentsOf: paths.claudeApp.appendingPathComponent("Contents/Info.plist")) as! [String: Any]
+        XCTAssertEqual(source["CFBundleIdentifier"] as? String, ClaudeInstallation.bundleIdentifier)
+        XCTAssertTrue(fm.fileExists(atPath: paths.claudeApp.appendingPathComponent("Contents/embedded.provisionprofile").path))
         // applications dir left read-only (updater guard)
         let perms = try fm.attributesOfItem(atPath: paths.applicationsDir.path)[.posixPermissions] as! Int
         XCTAssertEqual(perms & 0o777, 0o555)
-        // drift
         XCTAssertEqual(DriftDetector.check(claune, paths: paths, installation: inst), .upToDate)
+    }
+
+    /// Every Mach-O is re-signed with our identity, keeping its own entitlements minus the restricted ones that need
+    /// Anthropic's provisioning profile (with them the process would be killed at exec).
+    func testEveryComponentIsResignedWithoutRestrictedEntitlements() throws {
+        let inst = try ClaudeInstallation.locate(paths: paths)
+        let claune = Claune(name: "Test-Ents", colorHex: "#2E7D32")
+        let app = try BundleBuilder(paths: paths, launcherBinary: launcher).build(claune, installation: inst)
+        let c = app.appendingPathComponent("Contents")
+        let main = c.appendingPathComponent("MacOS/Claude")
+        let mainEnts = entitlements(of: main)
+        XCTAssertEqual(mainEnts["com.apple.security.cs.allow-jit"] as? Bool, true)
+        XCTAssertNil(mainEnts["keychain-access-groups"])
+        XCTAssertNil(mainEnts["com.apple.developer.team-identifier"])
+        XCTAssertTrue(codesign(["-dv", main.path]).output.contains("Identifier=\(claune.bundleIdentifier)"),
+                      "Claude runs as the Claune: stable designated requirement for keychain and TCC")
+        let helper = c.appendingPathComponent("Frameworks/Claude Helper.app")
+        XCTAssertEqual(entitlements(of: helper)["com.apple.security.cs.allow-jit"] as? Bool, true)
+        XCTAssertTrue(codesign(["-dv", helper.path]).output.contains("Identifier=com.anthropic.claudefordesktop.helper"), "helper identifiers are kept")
+        for file in [main, helper, c.appendingPathComponent("Resources/app.asar.unpacked/native.node")] {
+            let info = codesign(["-dv", file.path]).output
+            XCTAssertTrue(info.contains("Signature=adhoc"), "\(file.lastPathComponent) must carry our (test: ad-hoc) signature:\n\(info)")
+            XCTAssertTrue(info.contains("runtime"), "\(file.lastPathComponent) needs the hardened runtime:\n\(info)")
+        }
+    }
+
+    func testPreferredIdentityIsTheDeveloperIDApplicationCertificate() {
+        let out = """
+          1) 1111111111111111111111111111111111111111 "Apple Development: Someone (AAAAAAAAAA)"
+          2) 2222222222222222222222222222222222222222 "Developer ID Application: Dynex (92A2K3Q7NH)"
+             2 valid identities found
+        """
+        XCTAssertEqual(CodeSigner.developerIDIdentity(inFindIdentityOutput: out), "2222222222222222222222222222222222222222")
+        XCTAssertNil(CodeSigner.developerIDIdentity(inFindIdentityOutput: "     0 valid identities found\n"))
     }
 
     func testDriftStates() throws {
@@ -102,9 +157,9 @@ final class BundleBuilderTests: XCTestCase {
         // renamed profile
         var renamed = claune; renamed.name = "Test-Drift2"
         XCTAssertEqual(DriftDetector.check(renamed, paths: paths, installation: inst), .missing)
-        // corrupt: nested clone removed
+        // corrupt: Claude binary removed
         try FileOps.withWritable(paths.applicationsDir) {
-            try fm.removeItem(at: paths.appBundle(for: claune).appendingPathComponent("Contents/Claude.app"))
+            try fm.removeItem(at: paths.appBundle(for: claune).appendingPathComponent("Contents/MacOS/Claude"))
         }
         if case .corrupt = DriftDetector.check(claune, paths: paths, installation: inst) {} else { XCTFail("expected corrupt") }
     }
@@ -122,6 +177,30 @@ final class BundleBuilderTests: XCTestCase {
         XCTAssertEqual(stamp.launcherHash, BundleBuilder.digest(of: launcher))
     }
 
+    /// Runs codesign, returns exit status and combined output (codesign -d writes to stderr).
+    private func codesign(_ args: [String]) -> (status: Int32, output: String) {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/codesign"); p.arguments = args
+        let pipe = Pipe(); p.standardError = pipe; p.standardOutput = pipe
+        try? p.run(); p.waitUntilExit()
+        return (p.terminationStatus, String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+    }
+
+    private func sign(_ url: URL, entitlements: [String: Any]) throws {
+        let ents = root.appendingPathComponent("ents-\(UUID().uuidString).plist")
+        (entitlements as NSDictionary).write(to: ents, atomically: true)
+        let r = codesign(["--force", "--sign", "-", "--entitlements", ents.path, url.path])
+        guard r.status == 0 else { throw NSError(domain: "test", code: Int(r.status), userInfo: [NSLocalizedDescriptionKey: r.output]) }
+    }
+
+    private func entitlements(of url: URL) -> [String: Any] {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        p.arguments = ["-d", "--entitlements", "-", "--xml", url.path]
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
+        try? p.run(); p.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] ?? [:]
+    }
+
     /// `codesign -dv` output (it writes to stderr) for a file.
     private func signatureInfo(of file: URL) -> String {
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/codesign"); p.arguments = ["-dv", file.path]
@@ -130,10 +209,9 @@ final class BundleBuilderTests: XCTestCase {
         return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
     }
 
-    /// A release build ships a Developer ID + hardened-runtime launcher. Copied as-is into a wrapper that has no
-    /// bundle seal, Gatekeeper reports the Claune as "damaged" (code has no resources but signature indicates they
-    /// must be present). The copy inside the bundle must therefore always be ad-hoc signed (SPIKE.md, code signing summary).
-    func testBuiltLauncherIsAdHocSignedWhateverTheSourceSignature() throws {
+    /// A release build ships a Developer ID signed launcher. Inside a Claune it is the bundle's main executable and must
+    /// carry the Claune's own signature (here ad-hoc, the builder's identity in tests), never the one it was shipped with.
+    func testBuiltLauncherCarriesTheClauneSignatureWhateverTheSourceSignature() throws {
         let fm = FileManager.default
         let signedSource = root.appendingPathComponent("signed-launcher")
         try fm.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: signedSource)   // any Mach-O with a real (non-adhoc) signature
@@ -143,7 +221,8 @@ final class BundleBuilderTests: XCTestCase {
         let app = try BundleBuilder(paths: paths, launcherBinary: signedSource).build(claune, installation: inst)
         let copy = app.appendingPathComponent("Contents/MacOS/ClauneLauncher")
         let info = signatureInfo(of: copy)
-        XCTAssertTrue(info.contains("Signature=adhoc"), "launcher inside the Claune must be ad-hoc signed, got:\n\(info)")
+        XCTAssertTrue(info.contains("Signature=adhoc"), "launcher inside the Claune must carry the builder's signature, got:\n\(info)")
+        XCTAssertTrue(info.contains("Identifier=\(claune.bundleIdentifier)"), info)
         XCTAssertTrue(info.contains("TeamIdentifier=not set"), info)
         // The source is untouched and the drift stamp still hashes the shipped launcher, not the re-signed copy.
         XCTAssertTrue(signatureInfo(of: signedSource).contains("Signature size="), "source launcher must not be modified")
