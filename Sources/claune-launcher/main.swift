@@ -24,6 +24,16 @@ func alert(_ title: String, _ message: String, openDownload: Bool = false) -> Ne
     exit(1)
 }
 
+// Guard mode (spawned by ourselves just before exec, below): keep Claude in Chrome on the original Claude while
+// this Claune's Claude runs, then exit. No UI, no LaunchServices registration.
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == NativeMessagingHost.guardArgument,
+   let pid = pid_t(CommandLine.arguments[2]) {
+    let p = ClaunesPaths.standard
+    NativeMessagingHost.guardManifests(NativeMessagingHost.standardManifests, whileRunning: pid,
+                                       claunesDir: p.applicationsDir, claudeApp: p.claudeApp)
+    exit(0)
+}
+
 let bundle = Bundle.main.bundleURL
 let contents = bundle.appendingPathComponent("Contents")
 let plist = (NSDictionary(contentsOf: contents.appendingPathComponent("Info.plist")) as? [String: Any]) ?? [:]
@@ -92,6 +102,11 @@ if !FileManager.default.fileExists(atPath: dataDir.appendingPathComponent("Cooki
     if a.runModal() == .alertSecondButtonReturn {
         NSWorkspace.shared.open(URL(string: "https://claude.ai/logout")!)
     }
+}
+// Claude rewrites the shared Claude in Chrome manifest to this Claune at start; the guard gives it back (SPIKE.md).
+// It watches our pid, which becomes Claude's with the exec, and exits with it, so the bundle is free once Claude quits.
+if let me = Bundle.main.executableURL {
+    Relaunch.spawnDetached(me, arguments: [NativeMessagingHost.guardArgument, String(getpid())])
 }
 var args: [String] = [target, "--user-data-dir=\(dataDir.path)"]
 args.append(contentsOf: forwardedArgs)
