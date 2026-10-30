@@ -411,7 +411,8 @@ Window: up to 1 s after a Claune (re)writes, the extension would spawn the Claun
 
 Verified: XCTest (`NativeMessagingHostTests`, temp dirs, fake process via `sleep`); guard mode of the built launcher
 against the real Chrome manifest pointed at a fake `Test-NMH` Claune: restored within 1 s, guard gone with the pid,
-original bytes put back. Not yet verified: a full Claune launch from LaunchServices (drift hand-off and first-launch alert
-make a debug-built `Test-*` Claune awkward); check after the next release with a `Test-*` Claune and
-`grep path ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_browser_extension.json`.
+original bytes put back. Full launch verified the same day on Test-NMH (layout R, LaunchServices, debug
+build): before launch the manifest pointed at a running 0.3.0 Claune (iFacto.Dev, no guard); once Test-NMH's launcher
+spawned the guard (`--claune-native-host-guard <Claude pid>`) it pointed at `/Applications/Claude.app` and stayed there,
+Test-NMH's own startup write included. Quitting Claude ended the guard (no process left in the bundle), delete worked.
 
