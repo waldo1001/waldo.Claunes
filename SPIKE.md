@@ -304,3 +304,57 @@ User experience when Claude Desktop updates: from waldo.Claunes the Claune start
 From the Dock/Spotlight the icon bounces, the launcher exits, and about a second later the Claune
 opens from the regenerated bundle. A Claune that was already running keeps its old clone until it
 is quit and started again.
+
+### Layout G is dead from Claude 4.29.0: Electron checks a digest of the integrity dictionary (2026-10-30)
+
+Symptom: every Claune rebuilt from Claude 4.29.0 or 4.4212.0 dies about 2.5 s after launch
+(`EXC_BREAKPOINT`/SIGTRAP in Electron Framework). stderr, running the binary directly:
+`FATAL:electron/shell/common/asar/archive.cc:256] Failed to get integrity for validatable asar
+archive: Claude.app/Contents/Resources/app.asar`, although our Info.plist has exactly that key.
+
+Cause (Electron `shell/common/asar/integrity_digest.mm`, identical in 44.4.3 and 44.9.3):
+`IsIntegrityDictionaryValid` hashes the whole `ElectronAsarIntegrity` dictionary (keys sorted,
+then key + algorithm + hash, SHA-256) and compares it with a digest the packager writes into
+a slot of the signed Electron Framework (`__DATA_CONST,__asar_integrity`, sentinel
+`AGbevlPCksUGKNL8TSn7wGmJEuJsXb2A`, then `used`, `version`, 32-byte digest). Slot unused: fail
+open. Slot used: any difference fails closed, reported as "Failed to get integrity".
+
+- Claude 3.6556.2: slot `used=0`. Claude 4.29.0 and 4.4212.0: `used=1 version=1`, digest
+  `8380f0ec…858a` = SHA-256 of Claude's own two-key dictionary (`Resources/app.asar`,
+  `Resources/ion-dist.asar`, new in 4.4212).
+- So the dictionary must be byte-for-byte Claude's. Layout G needs an extra key
+  (`Claude.app/Contents/Resources/…`, because Electron resolves the asar via the realpath of the
+  framework inside the nested clone, relative to `NSBundle.mainBundle`'s Contents = our wrapper).
+  Without the key: lookup fails; with it: digest fails. No plist edit can satisfy both.
+- Real APFS clones of the asar files in our `Resources` instead of symlinks: no change, Electron
+  never opens them (resources path comes from the nested framework).
+
+#### Experiment R: flat clone, own identity, ad-hoc re-signed (Test-Resign, 4.4212.0)
+
+`cp -c -R` of Claude.app; Info.plist: `CFBundleIdentifier` and `CFBundleDisplayName` changed,
+`CFBundleName` kept "Claude" (Electron derives helper app names from it), `ElectronAsarIntegrity`
+untouched; `embedded.provisionprofile` removed; `xattr -cr`; `codesign --force --deep --sign -`
+(no hardened runtime, no entitlements). Launched `Contents/MacOS/Claude --user-data-dir=<tmp>`.
+
+- Launches, no FATAL, no crash report. Main window created and visible, sign-in flow starts.
+- `lsappinfo`: name "Test-Resign", our bundle id and bundle path. `codesign -dv <pid>`: our
+  identifier, `Signature=adhoc`, no team.
+- Helpers: gpu, 3 renderers, network/audio/video-capture utilities with the same
+  `--service-sandbox-type` values as the real Claude. No sandbox denials in the log.
+- Costs observed:
+  - Keychain: SecurityAgent prompted at start and the main process stalled 16 s. Electron
+    safeStorage uses the item "Claude Safe Storage", shared with the real Claude, whose ACL
+    does not include ad-hoc code. Each re-sign (every Claude update) changes the cdhash, so the
+    prompt would come back after every update.
+  - Restricted entitlements (`keychain-access-groups`, `application-identifier`, team id) need
+    Anthropic's provisioning profile and must be dropped: webauthn/hardware key and Microsoft
+    SSO keychain sharing are lost. Unsigned-entitlement features too: log shows
+    `macOS VM-support probe: entitlement_missing` (Cowork VM). `com.apple.security.virtualization`
+    is not restricted and should be kept when signing (not yet verified ad-hoc).
+  - The process is no longer Anthropic-signed code (contradicts the G rationale above).
+  - Updater enabled in the clone (`[updater] App is installed, enabling ... auto-updates`):
+    still needs the 0555 guard.
+- Side effect found, also true for layout G: at every start Claude rewrites the shared
+  `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_browser_extension.json`
+  to point at its own `Contents/Helpers/chrome-native-host`. A Claune therefore hijacks
+  Claude in Chrome from the real Claude until the real one restarts (restored by hand after R).
