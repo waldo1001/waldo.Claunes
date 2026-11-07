@@ -38,7 +38,8 @@ records what works, what gets SIGKILLed, and why.
   Contents/MacOS/ClauneLauncher   our launcher (main executable), execs MacOS/Claude
   Contents/Resources/Claune.icns  our icon
   everything re-signed inside-out (CodeSigner): local Developer ID if the keychain has one, else ad-hoc;
-  hardened runtime, each component's own entitlements minus restricted ones (keychain-access-groups,
+  hardened runtime ONLY with a Developer ID (ad-hoc + runtime = library validation without a Team ID, dyld refuses
+  Electron Framework, issue #6), each component's own entitlements minus restricted ones (keychain-access-groups,
   com.apple.developer.*, com.apple.application-identifier); bundle and MacOS/Claude get identifier = bundle id.
 ```
 Why: Claude 4.29.0+ bakes a SHA-256 of the whole ElectronAsarIntegrity dictionary into its signed Electron
@@ -56,13 +57,16 @@ use `FileOps.withWritable` around any change there.
 
 ```sh
 swift build                 # all targets (debug)
-swift test                  # 11+ unit tests, fake Claude.app, no side effects
-scripts/build-app.sh release   # -> build/waldo.Claunes.app (ad-hoc signed)
+swift test                  # 35+ unit tests, fake Claude.app, no side effects (needs full Xcode for XCTest)
+scripts/build-app.sh release   # -> build/waldo.Claunes.app, universal arm64+x86_64 (lipo), ad-hoc signed; debug = host arch
 scripts/release.sh "Developer ID Application: Dynex (92A2K3Q7NH)" [claunes]  # Developer ID sign (+ notarize with the keychain profile)
 scripts/deploy.sh               # install latest GitHub release (verified) + resync stopped Claunes + launch; --local builds from source
 .build/debug/claunes doctor    # checks paths and the installed Claude
 ```
-CI: `.github/workflows/ci.yml` (build + test + unsigned app artifact on push/PR). Release: push tag `v$(cat VERSION)`;
+CI: `.github/workflows/ci.yml` (build + test + universal unsigned app artifact on push/PR, plus `test-intel` on
+`macos-15-intel`). Architecture guards in `build-app.sh`, CI, Release and `deploy.sh`: never ship a single-arch app.
+Tests that need a process running from a bundle use `TestResident` (self-built), never a copy of `/bin/sleep` (hangs
+unkillably on some Macs, SPIKE.md 2026-11-07). Release: push tag `v$(cat VERSION)`;
 `.github/workflows/release.yml` signs, notarizes (env-var credentials in `release.sh`) and publishes the GitHub Release.
 Smoke test by hand only with Claunes named `Test-*`; delete them afterwards (CLI `delete` or the app).
 If a test Claune was launched, restore the URL handler: `claunes handler com.anthropic.claudefordesktop`.

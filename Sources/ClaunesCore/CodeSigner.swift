@@ -3,12 +3,17 @@ import Foundation
 /// Re-signs a clone of Claude.app as a Claune (layout R, SPIKE.md 2026-10-30): every Mach-O, inside-out, with the
 /// hardened runtime and each component's own entitlements minus the restricted ones that only work with Anthropic's
 /// provisioning profile. With a Developer ID the designated requirement (identifier + team) survives every re-sign,
-/// so a keychain "Always Allow" survives Claude updates; ad-hoc ("-") works too but prompts again after each rebuild.
+/// so a keychain "Always Allow" survives Claude updates; ad-hoc ("-") works too but prompts again after each rebuild,
+/// and is signed without the hardened runtime (see `runtimeArguments`).
 public struct CodeSigner {
     /// "-" for ad-hoc, otherwise a certificate SHA-1 or name as `codesign --sign` accepts it.
     public let identity: String
 
     public init(identity: String) { self.identity = identity }
+
+    /// Hardened runtime only with a real identity. It turns on library validation (same Team ID or Apple), and ad-hoc
+    /// code has no Team ID, so dyld would refuse Claude's own Electron Framework (issue #6; SPIKE.md experiment R).
+    var runtimeArguments: [String] { identity == "-" ? [] : ["--options", "runtime"] }
 
     /// Entitlements that need a matching provisioning profile; signed without one, the process is killed at exec.
     static let restrictedEntitlementPrefixes = ["com.apple.application-identifier", "com.apple.developer.", "keychain-access-groups"]
@@ -73,7 +78,7 @@ public struct CodeSigner {
     }
 
     private func sign(_ url: URL, entitlementsFrom source: URL?, identifier: String?) throws {
-        var args = ["--force", "--sign", identity, "--options", "runtime", "--timestamp=none"]
+        var args = ["--force", "--sign", identity] + runtimeArguments + ["--timestamp=none"]
         args += identifier.map { ["--identifier", $0] } ?? ["--preserve-metadata=identifier"]
         var entsFile: URL? = nil
         if let source, let ents = CodeSigner.entitlements(of: source) {

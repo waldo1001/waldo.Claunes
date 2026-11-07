@@ -123,8 +123,15 @@ final class BundleBuilderTests: XCTestCase {
         for file in [main, helper, c.appendingPathComponent("Resources/app.asar.unpacked/native.node")] {
             let info = codesign(["-dv", file.path]).output
             XCTAssertTrue(info.contains("Signature=adhoc"), "\(file.lastPathComponent) must carry our (test: ad-hoc) signature:\n\(info)")
-            XCTAssertTrue(info.contains("runtime"), "\(file.lastPathComponent) needs the hardened runtime:\n\(info)")
+            // Ad-hoc + hardened runtime = library validation without a Team ID: dyld refuses Electron Framework (issue #6).
+            XCTAssertFalse(info.contains("runtime"), "\(file.lastPathComponent): ad-hoc must not carry the hardened runtime:\n\(info)")
         }
+    }
+
+    /// Hardened runtime only with a real identity (Developer ID: same Team ID everywhere, library validation passes).
+    func testHardenedRuntimeOnlyWithARealIdentity() {
+        XCTAssertEqual(CodeSigner(identity: "-").runtimeArguments, [], "ad-hoc: no Team ID, so no library validation")
+        XCTAssertEqual(CodeSigner(identity: "2222222222222222222222222222222222222222").runtimeArguments, ["--options", "runtime"])
     }
 
     func testPreferredIdentityIsTheDeveloperIDApplicationCertificate() {
@@ -241,7 +248,7 @@ final class BundleBuilderTests: XCTestCase {
         let before = try XCTUnwrap(BundleBuilder.stamp(of: app))
         // A process executing from inside the bundle, like the launcher or Claude itself.
         let resident = app.appendingPathComponent("Contents/MacOS/resident")
-        try fm.copyItem(at: URL(fileURLWithPath: "/bin/sleep"), to: resident)
+        try TestResident.make(at: resident)
         let p = Process(); p.executableURL = resident; p.arguments = ["30"]
         try p.run()
         defer { if p.isRunning { p.terminate(); p.waitUntilExit() } }
@@ -278,7 +285,7 @@ final class BundleBuilderTests: XCTestCase {
         let claune = try manager.create(name: "Test-Busy")
         let app = paths.appBundle(for: claune)
         let resident = app.appendingPathComponent("Contents/MacOS/resident")
-        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/sleep"), to: resident)
+        try TestResident.make(at: resident)
         let p = Process(); p.executableURL = resident; p.arguments = ["30"]
         try p.run()
         defer { if p.isRunning { p.terminate(); p.waitUntilExit() } }

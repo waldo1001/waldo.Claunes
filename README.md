@@ -18,11 +18,13 @@ Inspired by the functionality of [Multi-Claude](https://multiclaude.app).
 
 ## Requirements
 
-- macOS 13 or later on Apple Silicon (developed on macOS 26). Intel Macs are not supported.
+- macOS 13 or later, Apple Silicon or Intel (universal app since 0.4.0; up to 0.3.1 Apple
+  Silicon only). Developed on macOS 26, verified on an Intel Mac with macOS 15.
 - Claude Desktop installed in `/Applications/Claude.app`. waldo.Claunes runs Anthropic's
   app; it does not bundle, re-host or modify it. If it is missing, the app says so and
   links to the download page.
-- Xcode command line tools (Swift 5.9+) to build from source.
+- Xcode command line tools (Swift 5.9+) to build from source; full Xcode to run the tests
+  (XCTest). On macOS 15 Sequoia the newest usable Xcode is 26.3 (26.4+ needs macOS 26).
 
 ## Install / build
 
@@ -42,7 +44,9 @@ stopped Claunes so they get the new launcher; running Claunes are repaired at th
 launch. Options: `--version X.Y.Z`, `--local` (build and sign from source instead,
 optionally with `--identity "..."`), `--dest ~/Applications`, `--no-launch`.
 
-Or build only: `scripts/build-app.sh release` produces `build/waldo.Claunes.app`.
+Or build only: `scripts/build-app.sh release` produces a universal `build/waldo.Claunes.app`
+(arm64 + x86_64; `debug` builds only this Mac's architecture). The build, CI and `deploy.sh`
+refuse an app that lacks an architecture they need.
 Tests: `swift test`. Command line interface (same core, handy for scripting):
 `build/waldo.Claunes.app/Contents/MacOS/claunes list|create|launch|resync|rename|delete|migrate|doctor`.
 
@@ -120,6 +124,10 @@ Full research notes with the experiments that led here: [SPIKE.md](SPIKE.md).
   You may see Claude's "update failed / restart to update" banner inside a Claune.
 - **Sign-in callback routing** depends on which Claude instance is frontmost when you
   click Sign in (the app re-asserts the `claude://` handler on activation).
+- **Without a Developer ID certificate in your keychain** (the usual case) each Claune is
+  re-signed ad-hoc, so macOS asks for "Claude Safe Storage" keychain access again after
+  every rebuild (a Claude update or a new waldo.Claunes). With a Developer ID the approval
+  survives rebuilds.
 - **macOS permission prompts repeat per Claune** (Accessibility, Screen Recording,
   folders...): each Claune is its own app to macOS.
 - "Claude in Chrome" local pairing is disabled by Claude when the data dir is relocated.

@@ -94,6 +94,9 @@ jobs:
         run: |
           xcrun stapler validate build/waldo.Claunes.app
           spctl -a -vv -t exec build/waldo.Claunes.app
+          for bin in build/waldo.Claunes.app/Contents/MacOS/*; do   # universal: Apple Silicon + Intel
+            A=" $(lipo -archs "$bin") "; [[ "$A" == *" arm64 "* && "$A" == *" x86_64 "* ]] || { echo "::error::$bin is not universal:$A"; exit 1; }
+          done
           cd build && shasum -a 256 "waldo.Claunes-$VERSION.zip" > "waldo.Claunes-$VERSION.zip.sha256"
 
       - name: Publish GitHub Release

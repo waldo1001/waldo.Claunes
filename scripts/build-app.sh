@@ -2,16 +2,26 @@
 # Builds waldo.Claunes.app from the SwiftPM products. Usage: scripts/build-app.sh [debug|release]
 set -euo pipefail
 CONFIG=${1:-release}
+# Architectures to build: release is universal (Apple Silicon + Intel), debug only the host. Override with ARCHS="...".
+if [ "$CONFIG" = release ]; then ARCHS=${ARCHS:-"arm64 x86_64"}; else ARCHS=${ARCHS:-$(uname -m)}; fi
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
-swift build -c "$CONFIG"
-BIN=$(swift build -c "$CONFIG" --show-bin-path)
+# One build per architecture, merged with lipo. Not `swift build --arch a --arch b`: that switches to xcbuild
+# (full Xcode only); a plain single-arch build stays on SwiftPM's own build system.
+BINS=()
+for arch in ${=ARCHS}; do
+  swift build -c "$CONFIG" --arch "$arch"
+  BINS+=("$(swift build -c "$CONFIG" --arch "$arch" --show-bin-path)")
+done
 APP="$ROOT/build/waldo.Claunes.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN/ClaunesApp" "$APP/Contents/MacOS/waldo.Claunes"
-cp "$BIN/claune-launcher" "$APP/Contents/MacOS/claune-launcher"
-cp "$BIN/claunes" "$APP/Contents/MacOS/claunes"
+merge() { # merge <product> <name in bundle>
+  lipo -create -output "$APP/Contents/MacOS/$2" "${BINS[@]/%//$1}"
+}
+merge ClaunesApp waldo.Claunes
+merge claune-launcher claune-launcher
+merge claunes claunes
 VERSION=$(cat "$ROOT/VERSION" 2>/dev/null || echo 0.1.0)
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -36,6 +46,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 echo -n 'APPL????' > "$APP/Contents/PkgInfo"
 # App icon: generated, Claude-style tile with a "C" in the default palette color.
-"$BIN/claunes" icon "$APP/Contents/Resources/AppIcon.icns" || true
+"$APP/Contents/MacOS/claunes" icon "$APP/Contents/Resources/AppIcon.icns" || true
 codesign --force --sign - --deep "$APP" >/dev/null 2>&1 || true
-echo "built $APP"
+# Guard: every executable must contain every requested architecture (release: universal, so Intel Macs work too).
+for bin in "$APP"/Contents/MacOS/*; do
+  HAVE=" $(lipo -archs "$bin") "
+  for arch in ${=ARCHS}; do
+    [[ "$HAVE" == *" $arch "* ]] || { echo "error: ${bin#$ROOT/} lacks $arch (has:$HAVE)" >&2; exit 1; }
+  done
+done
+echo "built $APP ($ARCHS)"

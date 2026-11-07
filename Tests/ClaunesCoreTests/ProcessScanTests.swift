@@ -17,7 +17,7 @@ final class ProcessScanTests: XCTestCase {
 
     func testFindsProcessesExecutingUnderDirectoryIncludingSelf() throws {
         let sleeper = root.appendingPathComponent("sleeper")
-        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/sleep"), to: sleeper)
+        try TestResident.make(at: sleeper)
         let p = Process(); p.executableURL = sleeper; p.arguments = ["30"]
         try p.run()
         defer { p.terminate(); p.waitUntilExit() }

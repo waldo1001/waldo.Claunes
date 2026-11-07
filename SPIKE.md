@@ -416,3 +416,27 @@ build): before launch the manifest pointed at a running 0.3.0 Claune (iFacto.Dev
 spawned the guard (`--claune-native-host-guard <Claude pid>`) it pointed at `/Applications/Claude.app` and stayed there,
 Test-NMH's own startup write included. Quitting Claude ended the guard (no process left in the bundle), delete worked.
 
+
+### Intel Macs: universal build, and ad-hoc signing without the hardened runtime (2026-11-07)
+
+Machine: Intel Core i9-9900K, macOS 15.8.1, Xcode 26.3 (26.4+ needs Tahoe), Claude 4.4212.0 (x86_64-only build),
+no Developer ID in the keychain. Issues #4 and #6.
+
+- Releases up to 0.3.1 were arm64-only (built on Apple Silicon runners), so they cannot run on Intel at all.
+  `build-app.sh release` now builds per architecture and merges with lipo. The launcher in a Claune is universal,
+  `MacOS/Claude` and the frameworks stay whatever Claude.app ships (here x86_64). A universal launcher exec'ing an
+  x86_64 Claude works.
+- Layout R on Intel works unchanged: clone, Info.plist edits, `ElectronAsarIntegrity` byte-for-byte Claude's, inside-out
+  re-sign, LaunchServices identity "Test-Intel" with the Claune bundle id, first-launch hint, Chrome native-host guard
+  (the Edge manifest stayed on /Applications/Claude.app the whole time), resync, delete to the Trash.
+- **Ad-hoc + hardened runtime never launches.** `CodeSigner` used `--options runtime` for ad-hoc too. The runtime turns on
+  library validation (same Team ID or Apple), ad-hoc code has no Team ID, so dyld refuses `Electron Framework`:
+  `mapping process and mapped file (non-platform) have different Team IDs` (DYLD "Library missing", at exec). This
+  hits every Mac without a Developer ID, Apple Silicon too; it went unseen because the development Mac has one
+  (experiment R was ad-hoc *without* runtime, R2 Developer ID *with* runtime). Re-signing the same bundle ad-hoc
+  without runtime (entitlements and identifiers kept) launched. Fix: ad-hoc signs without runtime
+  (`CodeSigner.runtimeArguments`); after `resync` the Claune ran (10 processes, guard, no crash report).
+  Ad-hoc still costs the "Claude Safe Storage" keychain prompt after every rebuild (experiment R).
+- Test-only finding on this Mac: a relocated copy of `/bin/sleep` never finishes exiting (state `UE`, unkillable until
+  reboot; the original, a copy of `/usr/bin/true` and a self-built sleeper are fine; pausing Norton did not change it).
+  Tests now build their own resident binary (`TestResident`).

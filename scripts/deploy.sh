@@ -60,6 +60,15 @@ else
   spctl -a -t exec "$APP" 2>/dev/null || { echo "Gatekeeper rejects the download (not notarized?)"; exit 1; }
   echo "    $VERSION, Developer ID $TEAM_ID, notarized"
 fi
+# The hardware, not `uname -m`: a shell under Rosetta reports x86_64 on Apple Silicon.
+HOST_ARCH=$([ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] && echo arm64 || echo x86_64)
+echo "==> check architecture ($HOST_ARCH)"
+for bin in "$APP"/Contents/MacOS/*; do
+  [[ " $(lipo -archs "$bin") " == *" $HOST_ARCH "* ]] || {
+    echo "${bin:t} has no $HOST_ARCH code ($(lipo -archs "$bin")): this build cannot run on this Mac. Releases before 0.4.0 are Apple Silicon only."
+    exit 1
+  }
+done
 CLI="$APP/Contents/MacOS/claunes"
 TARGET="$DEST/waldo.Claunes.app"
 

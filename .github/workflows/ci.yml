@@ -28,8 +28,8 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: .build
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ hashFiles('Sources/**', 'Tests/**') }}
-          restore-keys: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+          key: spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ hashFiles('Sources/**', 'Tests/**') }}
+          restore-keys: spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
 
       - name: Build (debug)
         run: swift build
@@ -48,6 +48,9 @@ jobs:
           test -x "$APP/Contents/MacOS/claune-launcher"
           test -s "$APP/Contents/Resources/AppIcon.icns"
           codesign --verify --deep --strict "$APP"
+          for bin in "$APP"/Contents/MacOS/*; do   # universal: Apple Silicon + Intel
+            A=" $(lipo -archs "$bin") "; [[ "$A" == *" arm64 "* && "$A" == *" x86_64 "* ]] || { echo "::error::$bin is not universal:$A"; exit 1; }
+          done
 
       - name: Package
         run: ditto -c -k --keepParent build/waldo.Claunes.app "build/waldo.Claunes-$(cat VERSION)-${GITHUB_SHA::7}-unsigned.zip"
@@ -57,3 +60,26 @@ jobs:
           name: waldo.Claunes-unsigned
           path: build/*.zip
           retention-days: 14
+
+  # The same tests natively on Intel (x86_64): the release is universal and Intel Macs run the x86_64 slice.
+  # macos-15-intel is GitHub's last Intel image (supported until ~autumn 2027).
+  test-intel:
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          swift --version
+          [ "$(uname -m)" = x86_64 ] || { echo "::error::expected an Intel runner, got $(uname -m)"; exit 1; }
+
+      - uses: actions/cache@v6
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ hashFiles('Sources/**', 'Tests/**') }}
+          restore-keys: spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+
+      - name: Test (x86_64)
+        run: swift test --parallel
